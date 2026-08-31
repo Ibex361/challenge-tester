@@ -6,9 +6,8 @@ Flow:
   2. Click it -> this opens/redirects to the challenge bot.
   3. Wait for a "Start Quiz" style button from the challenge bot, click it.
   4. For each of 5 questions: read question + options, ask Gemini which
-     option is correct, click that option's button.
-  5. Question 5's click is gated so it never lands sooner than
-     MIN_SECONDS_SINCE_START_QUIZ seconds after the "Start Quiz" click.
+     option is correct, click that option's button. No artificial pacing --
+     Gemini's own latency (plus rate-limit backoff) sets the pace.
 
 Every stage logs clearly to stdout AND to the GitHub Actions job summary
 (if running in Actions), so a failure is easy to locate.
@@ -27,6 +26,7 @@ from telethon.sessions import StringSession
 from telethon.tl.custom import Message
 
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 
 
 # ----------------------------------------------------------------------
@@ -47,7 +47,6 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 ).split(",")
 
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
-MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "17"))
 
 # Overall deadline: the workflow starts the process; this env var tells the
 # script the wall-clock UTC time it must give up by (ISO 8601). Falls back
@@ -140,6 +139,11 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
     """
     Returns the chosen option letter (e.g. "B"). Raises StageFailure if the
     model output can't be parsed into a valid option even after retry.
+
+    Handles Gemini rate limits (free-tier requests-per-minute) transparently:
+    on a 429 ResourceExhausted, waits for the server-suggested retry delay
+    (falling back to a fixed default if none is given) and tries again,
+    rather than crashing the whole run over a quota blip.
     """
     valid_letters = _LETTERS[: len(options)]
 
@@ -154,8 +158,25 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
 
     prompt = _build_prompt(question_text, options)
 
+    def _call_with_rate_limit_retry():
+        max_rate_limit_retries = 5
+        wait_for = 25  # seconds; matches Gemini's typical free-tier retry_delay
+        for attempt in range(1, max_rate_limit_retries + 1):
+            try:
+                return model.generate_content(prompt)
+            except ResourceExhausted:
+                log(
+                    f"Gemini answer ({attempt_label})",
+                    "INFO",
+                    f"rate limited (attempt {attempt}/{max_rate_limit_retries}), waiting {wait_for}s before retrying",
+                )
+                time.sleep(wait_for)
+                wait_for = min(wait_for * 1.5, 90)  # back off further if it keeps happening, capped
+        # Last attempt: let a ResourceExhausted here propagate as a clear failure.
+        return model.generate_content(prompt)
+
     def _try_once():
-        resp = model.generate_content(prompt)
+        resp = _call_with_rate_limit_retry()
         text = (resp.text or "").strip().upper()
         match = re.search(r"[A-F]", text)
         return match.group(0) if match else None
@@ -472,8 +493,7 @@ async def main():
         challenge_bot = await start_quiz_message.get_sender()
 
         await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
-        start_quiz_click_time = time.monotonic()
-        log("Click Start Quiz", "OK", f"timer started")
+        log("Click Start Quiz", "OK", "clicked")
 
         # ---- Stage 3: answer each question ----
         for q_num in range(1, TOTAL_QUESTIONS + 1):
@@ -496,13 +516,6 @@ async def main():
 
             answer_letter = ask_gemini_for_answer(question_text, options, stage)
             answer_index = _LETTERS.index(answer_letter)
-
-            if q_num == TOTAL_QUESTIONS:
-                elapsed = time.monotonic() - start_quiz_click_time
-                if elapsed < MIN_SECONDS_SINCE_START_QUIZ:
-                    wait_for = MIN_SECONDS_SINCE_START_QUIZ - elapsed
-                    log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before final click")
-                    await asyncio.sleep(wait_for)
 
             # Buttons were flattened row-by-row in extract_mcq_options; map
             # the flat index back to (row, col) for the click.
