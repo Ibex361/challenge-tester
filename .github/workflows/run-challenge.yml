@@ -17,6 +17,10 @@ on:
         description: "Scan channel history back this many hours for the Join button, instead of listening live (0 = disabled, normal live mode)"
         type: string
         default: "0"
+      gemini_model:
+        description: "Gemini model override (e.g. gemini-3.5-flash-lite). Leave blank to use the script's default. Ignored on scheduled runs."
+        type: string
+        default: ""
 
 jobs:
   run-challenge:
@@ -62,4 +66,11 @@ jobs:
           MIN_SECONDS_SINCE_START_QUIZ: "15"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
           DEBUG_SCAN_HISTORY_HOURS: ${{ github.event.inputs.debug_scan_history_hours || '0' }}
-        run: python run_challenge.py
+        run: |
+          if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
+            export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"
+            echo "Using GEMINI_MODEL override: $GEMINI_MODEL"
+          else
+            echo "No gemini_model input given -- using the script's built-in default"
+          fi
+          python run_challenge.py
