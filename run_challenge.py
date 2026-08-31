@@ -47,14 +47,14 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 ).split(",")
 
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
-MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "17"))
+MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "15"))
 
 # Overall deadline: the workflow starts the process; this env var tells the
 # script the wall-clock UTC time it must give up by (ISO 8601). Falls back
 # to "listen for 15 minutes from now" if not provided, so local testing works.
 DEADLINE_UTC_ISO = os.environ.get("DEADLINE_UTC_ISO")
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 # Temporary diagnostic switch: when true, logs EVERY incoming message across
 # every chat (not just the ones we're filtering for), so we can see exactly
