@@ -54,7 +54,7 @@ MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUI
 # to "listen for 15 minutes from now" if not provided, so local testing works.
 DEADLINE_UTC_ISO = os.environ.get("DEADLINE_UTC_ISO")
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
 # Temporary diagnostic switch: when true, logs EVERY incoming message across
 # every chat (not just the ones we're filtering for), so we can see exactly
@@ -471,7 +471,7 @@ async def main():
         )
         challenge_bot = await start_quiz_message.get_sender()
 
-        await start_quiz_message.click(loc[0], loc[1])
+        await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
         start_quiz_click_time = time.monotonic()
         log("Click Start Quiz", "OK", f"timer started")
 
@@ -511,7 +511,7 @@ async def main():
             for row_idx, row in enumerate(q_message.buttons):
                 for col_idx, _ in enumerate(row):
                     if flat_idx == answer_index:
-                        await q_message.click(row_idx, col_idx)
+                        await click_button_or_follow_deep_link(client, q_message, row_idx, col_idx, stage)
                         clicked = True
                         break
                     flat_idx += 1
