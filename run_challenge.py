@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from telethon import TelegramClient, events
@@ -196,6 +197,78 @@ def describe_button(button) -> str:
     return f"{type_name}{extra}"
 
 
+def parse_telegram_deep_link(url: str):
+    """
+    Parses a t.me deep link of the form:
+      https://t.me/<bot_username>?start=<payload>
+      https://t.me/<bot_username>?startapp=<payload>
+    Returns (bot_username, start_payload) or (None, None) if it doesn't
+    match that shape (e.g. it's some other kind of link entirely).
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return None, None
+
+    if parsed.netloc not in ("t.me", "telegram.me"):
+        return None, None
+
+    bot_username = parsed.path.strip("/")
+    if not bot_username:
+        return None, None
+
+    query = urllib.parse.parse_qs(parsed.query)
+    payload = None
+    for key in ("start", "startapp"):
+        if key in query and query[key]:
+            payload = query[key][0]
+            break
+
+    return bot_username, payload
+
+
+async def click_button_or_follow_deep_link(client, message, row, col, stage_name):
+    """
+    Clicks a button the way a real user tap would behave, handling both
+    button kinds correctly:
+      - Callback buttons: message.click() works as normal — it submits the
+        callback to Telegram, and the bot reacts server-side.
+      - URL buttons pointing at a t.me/<bot>?start=<payload> deep link:
+        message.click() does NOT replicate a real tap for these — it just
+        returns the URL and does nothing further. A real tap opens a chat
+        with that bot and sends "/start <payload>" as a message. We
+        replicate that explicitly: resolve the bot and send that command
+        ourselves.
+      - Any other URL (not a recognized bot deep link): we can't safely
+        automate arbitrary link-opening, so this raises a clear failure
+        rather than silently doing nothing.
+    Returns the bot entity that should be used for the rest of the flow.
+    """
+    button = message.buttons[row][col]
+    raw = getattr(button, "button", button)
+    url = getattr(raw, "url", None)
+
+    if url:
+        bot_username, payload = parse_telegram_deep_link(url)
+        if bot_username is None:
+            raise StageFailure(
+                stage_name,
+                f"button is a URL button but not a recognized bot deep link ({url}); can't automate this safely",
+            )
+
+        log(stage_name, "INFO", f"URL button detected -> deep link to @{bot_username} with payload '{payload}'; replicating a real tap by sending /start")
+        bot_entity = await client.get_entity(bot_username)
+        start_command = f"/start {payload}" if payload else "/start"
+        await client.send_message(bot_entity, start_command)
+        log(stage_name, "OK", f"sent '{start_command}' to @{bot_username}")
+        return bot_entity
+
+    # Not a URL button -> normal callback button, .click() is correct here.
+    await message.click(row, col)
+    log(stage_name, "OK", "clicked callback button")
+    return None
+
+
 def find_button_by_hints(message: Message, hints: list[str]):
     """
     message.buttons is a 2D list of Telethon Button objects.
@@ -350,11 +423,8 @@ async def main():
                 client, channel_entity, JOIN_BUTTON_TEXT_HINTS,
                 DEBUG_SCAN_HISTORY_HOURS, "Scan channel history for Join button",
             )
-            log("DEBUG history scan", "OK", "found the Join button in recent history — clicking it now")
-            btn_obj = join_message.buttons[loc[0]][loc[1]]
-            log("DEBUG button type", "INFO", f"join button underlying type: {describe_button(btn_obj)}")
-            click_result = await join_message.click(loc[0], loc[1])
-            log("Click join button", "OK", f"click() returned: {click_result!r}")
+            log("DEBUG history scan", "OK", "found the Join button in recent history — triggering the join action now")
+            await click_button_or_follow_deep_link(client, join_message, loc[0], loc[1], "Click join button")
             log("DEBUG mode", "INFO", "history-scan diagnostic complete; continuing with LIVE listening from here for the rest of the flow")
             # Falls through to the normal live-listening flow below for
             # stage 2 onward, since the bot's quiz messages can't be
@@ -384,10 +454,7 @@ async def main():
                 deadline,
                 "Wait for channel post with Join button",
             )
-            btn_obj = join_message.buttons[loc[0]][loc[1]]
-            log("DEBUG button type", "INFO", f"join button underlying type: {describe_button(btn_obj)}")
-            click_result = await join_message.click(loc[0], loc[1])
-            log("Click join button", "OK", f"click() returned: {click_result!r}")
+            await click_button_or_follow_deep_link(client, join_message, loc[0], loc[1], "Click join button")
 
         # ---- Stage 2: wait for "Start Quiz" from the challenge bot ----
         # We listen to ALL new incoming private messages, since we don't know
