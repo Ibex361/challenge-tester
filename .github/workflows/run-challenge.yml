@@ -59,6 +59,7 @@ jobs:
           CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
           DEADLINE_UTC_ISO: ${{ steps.deadline.outputs.deadline }}
           TOTAL_QUESTIONS: "5"
+          MIN_SECONDS_SINCE_START_QUIZ: "17"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
           DEBUG_SCAN_HISTORY_HOURS: ${{ github.event.inputs.debug_scan_history_hours || '0' }}
         run: python run_challenge.py
