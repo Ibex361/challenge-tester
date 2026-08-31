@@ -1,0 +1,41 @@
+name: Inspect Bot Buttons
+
+on:
+  # Manual-only — this is a one-off diagnostic, not something to run on a
+  # schedule. Trigger it from the Actions tab whenever you want a report.
+  workflow_dispatch:
+    inputs:
+      challenge_bot_username:
+        description: "Challenge bot username (no @)"
+        type: string
+        required: true
+      history_hours:
+        description: "How many hours of chat history to scan"
+        type: string
+        default: "6"
+
+jobs:
+  inspect-buttons:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Inspect button types
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          CHALLENGE_BOT_USERNAME: ${{ github.event.inputs.challenge_bot_username }}
+          HISTORY_HOURS: ${{ github.event.inputs.history_hours }}
+        run: python inspect_bot_buttons.py
