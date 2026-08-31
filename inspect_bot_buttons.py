@@ -28,6 +28,12 @@ SESSION_STRING = os.environ["TG_SESSION"]
 BOT_USERNAME = os.environ["CHALLENGE_BOT_USERNAME"]
 HISTORY_HOURS = float(os.environ.get("HISTORY_HOURS", "6"))
 
+# Optional: restrict the scan to ONE calendar day, e.g. "2026-08-28".
+# When set, this takes priority over HISTORY_HOURS -- only messages whose
+# UTC date falls on that day are included (00:00:00 through 23:59:59 UTC),
+# not "from that day until now". Leave blank to use HISTORY_HOURS instead.
+ON_DATE_RAW = os.environ.get("ON_DATE", "").strip()
+
 # When running in GitHub Actions, this points at a file whose contents get
 # rendered as the job's summary page -- so results are readable right in the
 # Actions UI, no log-scrolling or local files needed.
@@ -40,6 +46,29 @@ def describe_button(button) -> str:
     url = getattr(raw, "url", None)
     extra = f" url={url}" if url else ""
     return f"{type_name}{extra}"
+
+
+def resolve_window() -> tuple[datetime, datetime, str]:
+    """
+    Returns (window_start_utc, window_end_utc, description_for_report).
+    If ON_DATE is set, the window is exactly that one UTC calendar day
+    (00:00:00 through 23:59:59.999999). Otherwise falls back to
+    "the last HISTORY_HOURS hours, up to now".
+    """
+    if ON_DATE_RAW:
+        try:
+            day = datetime.fromisoformat(ON_DATE_RAW).date()
+        except ValueError:
+            raise ValueError(
+                f"Couldn't parse ON_DATE='{ON_DATE_RAW}'. Use the format 'YYYY-MM-DD', e.g. '2026-08-28'."
+            )
+        start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        end = start + timedelta(days=1) - timedelta(microseconds=1)
+        return start, end, f"messages on {day.isoformat()} (UTC), from ON_DATE='{ON_DATE_RAW}'"
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=HISTORY_HOURS)
+    return start, end, f"messages from the last {HISTORY_HOURS}h"
 
 
 def emit(lines: list[str]):
@@ -56,13 +85,18 @@ async def main():
     await client.start()
 
     bot_entity = await client.get_entity(BOT_USERNAME)
-    since = datetime.now(timezone.utc) - timedelta(hours=HISTORY_HOURS)
+    window_start, window_end, description = resolve_window()
 
-    emit([f"## Button type report for @{BOT_USERNAME}", "", f"Scanning last {HISTORY_HOURS}h of chat history.", ""])
+    emit([f"## Button type report for @{BOT_USERNAME}", "", f"Scanning {description}.", ""])
 
     found_any_buttons = False
     async for message in client.iter_messages(bot_entity, limit=200):
-        if message.date < since:
+        if message.date > window_end:
+            # Newer than the window we care about -- keep scrolling back.
+            continue
+        if message.date < window_start:
+            # Older than the window -- since messages come back newest
+            # first, everything after this is even older, so we're done.
             break
         if not message.buttons:
             continue
@@ -78,7 +112,7 @@ async def main():
         emit(block)
 
     if not found_any_buttons:
-        emit(["_No buttoned messages found in that window. Try a larger HISTORY_HOURS input._"])
+        emit(["_No buttoned messages found in that window. Try a different ON_DATE or a larger HISTORY_HOURS._"])
 
     await client.disconnect()
 

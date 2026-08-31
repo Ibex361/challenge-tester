@@ -9,8 +9,12 @@ on:
         description: "Challenge bot username (no @)"
         type: string
         required: true
+      on_date:
+        description: "Look only at this one UTC date (YYYY-MM-DD, e.g. 2026-08-28). Leave blank to use history_hours instead."
+        type: string
+        default: ""
       history_hours:
-        description: "How many hours of chat history to scan"
+        description: "Used only if on_date is left blank: how many hours of chat history to scan, ending now"
         type: string
         default: "6"
 
@@ -37,5 +41,6 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ secrets.TG_SESSION }}
           CHALLENGE_BOT_USERNAME: ${{ github.event.inputs.challenge_bot_username }}
+          ON_DATE: ${{ github.event.inputs.on_date }}
           HISTORY_HOURS: ${{ github.event.inputs.history_hours }}
         run: python inspect_bot_buttons.py
