@@ -1,0 +1,47 @@
+name: Test Gemini On History
+
+on:
+  # Manual-only — one-off diagnostic, not a schedule.
+  workflow_dispatch:
+    inputs:
+      challenge_bot_username:
+        description: "Challenge bot username (no @)"
+        type: string
+        required: true
+      on_date:
+        description: "Look only at this one UTC date (YYYY-MM-DD, e.g. 2026-08-26). Leave blank to use history_hours instead."
+        type: string
+        default: ""
+      history_hours:
+        description: "Used only if on_date is left blank: how many hours of chat history to scan, ending now"
+        type: string
+        default: "6"
+
+jobs:
+  test-gemini:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Replay questions through Gemini
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
+          CHALLENGE_BOT_USERNAME: ${{ github.event.inputs.challenge_bot_username }}
+          ON_DATE: ${{ github.event.inputs.on_date }}
+          HISTORY_HOURS: ${{ github.event.inputs.history_hours }}
+        run: python test_gemini_on_history.py
