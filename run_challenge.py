@@ -55,6 +55,11 @@ DEADLINE_UTC_ISO = os.environ.get("DEADLINE_UTC_ISO")
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
+# Temporary diagnostic switch: when true, logs EVERY incoming message across
+# every chat (not just the ones we're filtering for), so we can see exactly
+# what Telethon is receiving. Turn off once things are working reliably.
+DEBUG_LOG_ALL_EVENTS = os.environ.get("DEBUG_LOG_ALL_EVENTS", "false").lower() == "true"
+
 
 # ----------------------------------------------------------------------
 # Small helpers for clear, stage-based logging
@@ -289,6 +294,20 @@ async def main():
         # in any order). We keep listening across posts until one of them
         # has a button matching our hints.
         channel_entity = await client.get_entity(CHANNEL_USERNAME)
+        log("Resolve channel", "INFO", f"resolved '{CHANNEL_USERNAME}' -> id={channel_entity.id}, title={getattr(channel_entity, 'title', '?')}")
+
+        if DEBUG_LOG_ALL_EVENTS:
+            async def _debug_any_event(event):
+                msg = event.message
+                chat = await event.get_chat()
+                chat_id = getattr(chat, "id", "?")
+                chat_title = getattr(chat, "title", getattr(chat, "username", "?"))
+                has_buttons = bool(msg.buttons)
+                preview = (msg.text or "").strip().replace("\n", " ")[:60]
+                log("DEBUG any event", "INFO",
+                    f"chat_id={chat_id} title='{chat_title}' has_buttons={has_buttons} preview='{preview}'")
+            client.add_event_handler(_debug_any_event, events.NewMessage())
+            log("DEBUG mode", "INFO", "logging ALL incoming events (any chat) alongside normal stages")
 
         join_message, loc = await wait_for_message_with_button(
             client,

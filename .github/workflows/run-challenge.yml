@@ -7,7 +7,12 @@ on:
     - cron: "50 16 * * *"
 
   # Lets you trigger it manually from the Actions tab any time, e.g. for testing.
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      debug_log_all_events:
+        description: "Log every incoming message (diagnostic mode)"
+        type: boolean
+        default: false
 
 jobs:
   run-challenge:
@@ -51,4 +56,5 @@ jobs:
           DEADLINE_UTC_ISO: ${{ steps.deadline.outputs.deadline }}
           TOTAL_QUESTIONS: "5"
           MIN_SECONDS_SINCE_START_QUIZ: "25"
+          DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
         run: python run_challenge.py
