@@ -180,6 +180,22 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
 # Telegram button helpers
 # ----------------------------------------------------------------------
 
+def describe_button(button) -> str:
+    """
+    Returns a short human-readable description of a Telethon Button's
+    underlying type (URL button, callback button, etc.) — useful for
+    diagnosing why a .click() didn't behave as expected.
+    """
+    # Telethon custom Button wraps a raw Telegram type in `.button`.
+    raw = getattr(button, "button", button)
+    type_name = type(raw).__name__
+    extra = ""
+    url = getattr(raw, "url", None)
+    if url:
+        extra = f" url={url}"
+    return f"{type_name}{extra}"
+
+
 def find_button_by_hints(message: Message, hints: list[str]):
     """
     message.buttons is a 2D list of Telethon Button objects.
@@ -335,8 +351,10 @@ async def main():
                 DEBUG_SCAN_HISTORY_HOURS, "Scan channel history for Join button",
             )
             log("DEBUG history scan", "OK", "found the Join button in recent history — clicking it now")
-            await join_message.click(loc[0], loc[1])
-            log("Click join button", "OK")
+            btn_obj = join_message.buttons[loc[0]][loc[1]]
+            log("DEBUG button type", "INFO", f"join button underlying type: {describe_button(btn_obj)}")
+            click_result = await join_message.click(loc[0], loc[1])
+            log("Click join button", "OK", f"click() returned: {click_result!r}")
             log("DEBUG mode", "INFO", "history-scan diagnostic complete; continuing with LIVE listening from here for the rest of the flow")
             # Falls through to the normal live-listening flow below for
             # stage 2 onward, since the bot's quiz messages can't be
@@ -366,8 +384,10 @@ async def main():
                 deadline,
                 "Wait for channel post with Join button",
             )
-            await join_message.click(loc[0], loc[1])
-            log("Click join button", "OK")
+            btn_obj = join_message.buttons[loc[0]][loc[1]]
+            log("DEBUG button type", "INFO", f"join button underlying type: {describe_button(btn_obj)}")
+            click_result = await join_message.click(loc[0], loc[1])
+            log("Click join button", "OK", f"click() returned: {click_result!r}")
 
         # ---- Stage 2: wait for "Start Quiz" from the challenge bot ----
         # We listen to ALL new incoming private messages, since we don't know
