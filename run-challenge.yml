@@ -26,12 +26,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Compute deadline (8:05 PM EAT = 17:05 UTC, today)
+      - name: Compute deadline
         id: deadline
         run: |
-          DEADLINE=$(date -u +"%Y-%m-%dT17:05:00+00:00")
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # Scheduled run: listen until 8:05 PM EAT (17:05 UTC) today.
+            DEADLINE=$(date -u +"%Y-%m-%dT17:05:00+00:00")
+            echo "Scheduled run — deadline set to: $DEADLINE"
+          else
+            # Manual run (workflow_dispatch): listen for at most 15 minutes
+            # from now, whatever time it is.
+            DEADLINE=$(date -u -d "+15 minutes" +"%Y-%m-%dT%H:%M:%S+00:00")
+            echo "Manual run — deadline set to: $DEADLINE (15 min from now)"
+          fi
           echo "deadline=$DEADLINE" >> "$GITHUB_OUTPUT"
-          echo "Deadline set to: $DEADLINE"
 
       - name: Run challenge flow
         env:
