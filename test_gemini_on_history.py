@@ -26,7 +26,7 @@ from telethon.sessions import StringSession
 
 # Reuses the exact same prompt-building, model call, parsing and retry
 # logic the live flow uses -- so this tests the real thing, not a copy of it.
-from run_challenge import ask_gemini_for_answer, extract_mcq_options, StageFailure
+from run_challenge import ask_gemini_for_answer, extract_mcq_options, StageFailure, GEMINI_MODEL
 
 API_ID = int(os.environ["TG_API_ID"])
 API_HASH = os.environ["TG_API_HASH"]
@@ -82,7 +82,8 @@ async def main():
     bot_entity = await client.get_entity(BOT_USERNAME)
     window_start, window_end, description = resolve_window()
 
-    emit([f"## Gemini answer replay for @{BOT_USERNAME}", "", f"Scanning {description}.", "",
+    emit([f"## Gemini answer replay for @{BOT_USERNAME}", "", f"Model: `{GEMINI_MODEL}`", "",
+          f"Scanning {description}.", "",
           "_Diagnostic only -- nothing is clicked or sent to the bot._", ""])
 
     # Collect matching question messages, then replay oldest-first so the

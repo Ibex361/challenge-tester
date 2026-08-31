@@ -16,6 +16,10 @@ on:
         description: "Used only if on_date is left blank: how many hours of chat history to scan, ending now"
         type: string
         default: "6"
+      gemini_model:
+        description: "Gemini model to test (e.g. gemini-3.6-flash, gemini-3.5-flash-lite). Leave blank to use the script's default."
+        type: string
+        default: ""
 
 jobs:
   test-gemini:
@@ -44,4 +48,11 @@ jobs:
           CHALLENGE_BOT_USERNAME: ${{ github.event.inputs.challenge_bot_username }}
           ON_DATE: ${{ github.event.inputs.on_date }}
           HISTORY_HOURS: ${{ github.event.inputs.history_hours }}
-        run: python test_gemini_on_history.py
+        run: |
+          if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
+            export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"
+            echo "Using GEMINI_MODEL override: $GEMINI_MODEL"
+          else
+            echo "No gemini_model input given -- using the script's built-in default"
+          fi
+          python test_gemini_on_history.py
