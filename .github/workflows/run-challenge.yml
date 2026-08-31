@@ -13,6 +13,10 @@ on:
         description: "Log every incoming message (diagnostic mode)"
         type: boolean
         default: false
+      debug_scan_history_hours:
+        description: "Scan channel history back this many hours for the Join button, instead of listening live (0 = disabled, normal live mode)"
+        type: string
+        default: "0"
 
 jobs:
   run-challenge:
@@ -57,4 +61,5 @@ jobs:
           TOTAL_QUESTIONS: "5"
           MIN_SECONDS_SINCE_START_QUIZ: "25"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
+          DEBUG_SCAN_HISTORY_HOURS: ${{ github.event.inputs.debug_scan_history_hours || '0' }}
         run: python run_challenge.py
