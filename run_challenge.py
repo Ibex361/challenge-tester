@@ -47,7 +47,7 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 ).split(",")
 
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
-MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "25"))
+MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "17"))
 
 # Overall deadline: the workflow starts the process; this env var tells the
 # script the wall-clock UTC time it must give up by (ISO 8601). Falls back
