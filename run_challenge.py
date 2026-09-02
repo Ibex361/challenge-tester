@@ -167,15 +167,20 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
     valid_letters = _LETTERS[: len(options)]
 
     # thinking_level="minimal" turns off Gemini 3's internal reasoning pass
-    # for this call. Without it, Flash/Flash-Lite models default to a
-    # "medium"-depth thinking pass even for a trivial 4-way multiple-choice
-    # classification, which is what caused the multi-second/tens-of-seconds
-    # variance seen between questions -- not network latency.
+    # for this call. max_output_tokens is capped hard since the schema-
+    # constrained response is always a single letter -- this doesn't change
+    # correctness, but it removes any chance of the model padding output
+    # (e.g. restating the option text) and paying for tokens we discard.
     generation_config = genai_types.GenerateContentConfig(
         temperature=0,
         response_mime_type="text/x.enum",
         response_schema={"type": "STRING", "enum": valid_letters},
         thinking_config=genai_types.ThinkingConfig(thinking_level="minimal"),
+        max_output_tokens=8,
+        # No tools/functions are declared for this call -- explicitly turning
+        # off automatic function calling avoids the SDK's unnecessary AFC
+        # setup path (and the "not recommended" warning it logs).
+        automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
     )
 
     prompt = _build_prompt(question_text, options)
@@ -186,6 +191,11 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
         exception (network blip, momentary API hiccup, etc.) before giving
         up -- this is about the call itself failing, separate from the
         call succeeding but returning text we can't parse (handled below).
+
+        Backoff is short (0.5s) rather than a flat 2s: a Gemini ServerError
+        is almost always a momentary hiccup that clears on the very next
+        call, so there's no benefit to waiting longer, and every second
+        here is a second added to every question in the quiz.
         """
         max_attempts = 3
         last_error = None
@@ -204,11 +214,12 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
                         "INFO",
                         f"API call failed ({e.__class__.__name__}), retrying (attempt {attempt}/{max_attempts})",
                     )
-                    time.sleep(2)
+                    time.sleep(0.5)
         raise StageFailure(
             f"Gemini answer ({attempt_label})",
             f"Gemini API call failed after {max_attempts} attempts: {last_error}",
         )
+
 
     def _try_once():
         resp = _call_gemini()
