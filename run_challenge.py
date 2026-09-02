@@ -520,7 +520,15 @@ async def main():
             question_text = q_message.text or ""
             log(stage, "INFO", f"parsed {len(options)} options")
 
-            answer_letter = ask_gemini_for_answer(question_text, options, stage)
+            # ask_gemini_for_answer() is a blocking, synchronous call (network
+            # I/O + time.sleep on retry). Run it in a worker thread so it
+            # doesn't freeze this event loop -- otherwise Telethon can't
+            # process anything else (including the eventual button click)
+            # until the call returns, which is what caused the apparent
+            # "stall" on Question 4.
+            answer_letter = await asyncio.to_thread(
+                ask_gemini_for_answer, question_text, options, stage
+            )
             answer_index = _LETTERS.index(answer_letter)
             answer_text = options[answer_index] if answer_index < len(options) else "?"
             log(stage, "INFO", f"Gemini's answer: {answer_letter}) {answer_text}")
