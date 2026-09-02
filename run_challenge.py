@@ -39,10 +39,8 @@ API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-CHANNEL_USERNAME = os.environ["CHANNEL_USERNAME"]          # your channel, e.g. "my_channel"
-JOIN_BUTTON_TEXT_HINTS = os.environ.get(
-    "JOIN_BUTTON_TEXT_HINTS", "join challenge,join,challenge"
-).split(",")
+CHALLENGE_BOT_USERNAME = os.environ["CHALLENGE_BOT_USERNAME"]  # e.g. "birrforex_challenge_bot" (no @)
+CHALLENGE_NUMBER = os.environ["CHALLENGE_NUMBER"]              # e.g. "34" -> sends "/start challenge_34"
 START_QUIZ_TEXT_HINTS = os.environ.get(
     "START_QUIZ_TEXT_HINTS", "start quiz,start"
 ).split(",")
@@ -61,14 +59,6 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # every chat (not just the ones we're filtering for), so we can see exactly
 # what Telethon is receiving. Turn off once things are working reliably.
 DEBUG_LOG_ALL_EVENTS = os.environ.get("DEBUG_LOG_ALL_EVENTS", "false").lower() == "true"
-
-# Separate one-off diagnostic mode: instead of listening live going forward,
-# scan the channel's recent message HISTORY for a message with a matching
-# Join button, posted within the last N hours. Useful for testing against a
-# challenge you already posted earlier, without needing to be live for it.
-# This does NOT touch the real flow's live-listening logic at all — it's a
-# standalone diagnostic path.
-DEBUG_SCAN_HISTORY_HOURS = float(os.environ.get("DEBUG_SCAN_HISTORY_HOURS", "0"))
 
 
 # ----------------------------------------------------------------------
@@ -406,34 +396,6 @@ async def wait_for_message_with_button(client, event_builder, hints, deadline_dt
         client.remove_event_handler(handler, event_builder)
 
 
-async def scan_history_for_button(client, chat_entity, hints, hours, stage_name):
-    """
-    One-off diagnostic: scans the chat's recent message history (not live
-    events) for a message with a button matching `hints`, posted within the
-    last `hours` hours. Returns (message, (row, col)) or raises StageFailure.
-
-    This is ONLY for manual debugging against a challenge already posted
-    earlier — the real flow always uses live listening, never history scans,
-    because the bot's private quiz messages can't be scanned this way.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    log(stage_name, "START", f"scanning history back to {cutoff.isoformat()}")
-
-    checked = 0
-    async for msg in client.iter_messages(chat_entity, offset_date=None, limit=200):
-        if msg.date < cutoff:
-            break
-        checked += 1
-        loc = find_button_by_hints(msg, hints)
-        if loc is not None:
-            log(stage_name, "OK", f"found matching button in message from {msg.date.isoformat()} (checked {checked} messages)")
-            return msg, loc
-        preview = (msg.text or "").strip().replace("\n", " ")[:60]
-        log(stage_name, "INFO", f"message from {msg.date.isoformat()} has no matching button (preview: '{preview}')")
-
-    raise StageFailure(stage_name, f"no message with a matching button found in the last {hours}h ({checked} messages checked)")
-
-
 async def main():
     if DEADLINE_UTC_ISO:
         deadline = datetime.fromisoformat(DEADLINE_UTC_ISO)
@@ -447,23 +409,8 @@ async def main():
     log("Telegram login", "OK", "session authenticated")
 
     try:
-        channel_entity = await client.get_entity(CHANNEL_USERNAME)
-        log("Resolve channel", "INFO", f"resolved '{CHANNEL_USERNAME}' -> id={channel_entity.id}, title={getattr(channel_entity, 'title', '?')}")
-
-        # ---- Diagnostic-only path: scan history instead of listening live ----
-        if DEBUG_SCAN_HISTORY_HOURS > 0:
-            log("DEBUG mode", "INFO", f"scanning last {DEBUG_SCAN_HISTORY_HOURS}h of channel history instead of listening live")
-            join_message, loc = await scan_history_for_button(
-                client, channel_entity, JOIN_BUTTON_TEXT_HINTS,
-                DEBUG_SCAN_HISTORY_HOURS, "Scan channel history for Join button",
-            )
-            log("DEBUG history scan", "OK", "found the Join button in recent history — triggering the join action now")
-            await click_button_or_follow_deep_link(client, join_message, loc[0], loc[1], "Click join button")
-            log("DEBUG mode", "INFO", "history-scan diagnostic complete; continuing with LIVE listening from here for the rest of the flow")
-            # Falls through to the normal live-listening flow below for
-            # stage 2 onward, since the bot's quiz messages can't be
-            # history-scanned this way (they haven't been sent yet at
-            # scan time).
+        challenge_bot = await client.get_entity(CHALLENGE_BOT_USERNAME)
+        log("Resolve bot", "INFO", f"resolved '@{CHALLENGE_BOT_USERNAME}' -> id={challenge_bot.id}")
 
         if DEBUG_LOG_ALL_EVENTS:
             async def _debug_any_event(event):
@@ -478,32 +425,27 @@ async def main():
             client.add_event_handler(_debug_any_event, events.NewMessage())
             log("DEBUG mode", "INFO", "logging ALL incoming events (any chat) alongside normal stages")
 
-        # ---- Stage 1: wait for the channel post with the Join button ----
-        # (skipped if the debug history scan above already found and clicked it)
-        if DEBUG_SCAN_HISTORY_HOURS <= 0:
-            join_message, loc = await wait_for_message_with_button(
-                client,
-                events.NewMessage(chats=channel_entity),
-                JOIN_BUTTON_TEXT_HINTS,
-                deadline,
-                "Wait for channel post with Join button",
-            )
-            await click_button_or_follow_deep_link(client, join_message, loc[0], loc[1], "Click join button")
+        # ---- Stage 1: message the bot directly with the challenge payload ----
+        # No more listening on any channel -- we go straight to the bot the
+        # same way a real tap on the channel's Join button would have,
+        # replicating exactly what click_button_or_follow_deep_link() did
+        # for a URL button: send "/start challenge_<N>" to the bot.
+        start_command = f"/start challenge_{CHALLENGE_NUMBER}"
+        await client.send_message(challenge_bot, start_command)
+        log("Message bot", "OK", f"sent '{start_command}' to @{CHALLENGE_BOT_USERNAME}")
 
         # ---- Stage 2: wait for "Start Quiz" from the challenge bot ----
-        # We listen to ALL new incoming private messages, since we don't know
-        # the challenge bot's username until it messages us. The bot may send
-        # a plain "Welcome" message FIRST with no button, then a separate
-        # message with the "START QUIZ" button — so we keep listening across
-        # messages until one of them actually has the button we want.
+        # The bot may send a plain "Welcome" message FIRST with no button,
+        # then a separate message with the "START QUIZ" button -- so we keep
+        # listening across messages until one of them actually has the
+        # button we want. Scoped to just this bot's chat now.
         start_quiz_message, loc = await wait_for_message_with_button(
             client,
-            events.NewMessage(incoming=True),
+            events.NewMessage(chats=challenge_bot),
             START_QUIZ_TEXT_HINTS,
             deadline,
             "Wait for Start Quiz prompt",
         )
-        challenge_bot = await start_quiz_message.get_sender()
 
         await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
         start_quiz_click_time = time.monotonic()

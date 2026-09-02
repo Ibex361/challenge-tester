@@ -1,24 +1,21 @@
 name: Run Challenge Tester
 
 on:
-  # Runs automatically. Cron is in UTC. EAT = UTC+3.
-  # 7:50 PM EAT = 16:50 UTC.
-  schedule:
-    - cron: "50 16 * * *"
-
-  # Lets you trigger it manually from the Actions tab any time, e.g. for testing.
+  # Manual only -- trigger from the Actions tab and type in the challenge
+  # number (e.g. 34). Run this at/just before 17:00 UTC so the script is
+  # already listening the moment the bot's /start reply comes back.
   workflow_dispatch:
     inputs:
+      challenge_number:
+        description: "Challenge number to run (e.g. 34 -> sends '/start challenge_34' to the bot)"
+        type: string
+        required: true
       debug_log_all_events:
         description: "Log every incoming message (diagnostic mode)"
         type: boolean
         default: false
-      debug_scan_history_hours:
-        description: "Scan channel history back this many hours for the Join button, instead of listening live (0 = disabled, normal live mode)"
-        type: string
-        default: "0"
       gemini_model:
-        description: "Gemini model override (e.g. gemini-3.5-flash-lite). Leave blank to use the script's default. Ignored on scheduled runs."
+        description: "Gemini model override (e.g. gemini-3.5-flash-lite). Leave blank to use the script's default."
         type: string
         default: ""
 
@@ -43,12 +40,8 @@ jobs:
         id: deadline
         run: |
           # Listen for 15 minutes from whenever this job actually starts.
-          # Deliberately NOT a fixed clock time: GitHub's cron scheduler
-          # doesn't guarantee an on-time start (schedule runs can be
-          # delayed, sometimes by hours during peak load), so a fixed
-          # deadline can already be in the past by the time the job begins.
           DEADLINE=$(date -u -d "+15 minutes" +"%Y-%m-%dT%H:%M:%S+00:00")
-          echo "Deadline set to: $DEADLINE (15 min from actual start, trigger: ${{ github.event_name }})"
+          echo "Deadline set to: $DEADLINE (15 min from actual start)"
           echo "deadline=$DEADLINE" >> "$GITHUB_OUTPUT"
 
       - name: Run challenge flow
@@ -57,12 +50,12 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ secrets.TG_SESSION }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
+          CHALLENGE_BOT_USERNAME: ${{ secrets.CHALLENGE_BOT_USERNAME }}
+          CHALLENGE_NUMBER: ${{ github.event.inputs.challenge_number }}
           DEADLINE_UTC_ISO: ${{ steps.deadline.outputs.deadline }}
           TOTAL_QUESTIONS: "5"
           MIN_SECONDS_SINCE_START_QUIZ: "15"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
-          DEBUG_SCAN_HISTORY_HOURS: ${{ github.event.inputs.debug_scan_history_hours || '0' }}
         run: |
           if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
             export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"
