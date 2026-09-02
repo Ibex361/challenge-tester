@@ -33,6 +33,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -187,7 +188,11 @@ QUESTION_BANK = [
 TOTAL_QUESTIONS = 5
 LETTERS = ["A", "B", "C", "D", "E", "F"]
 
-# Per-chat quiz state: chat_id -> {"questions": [...], "index": int}
+# Per-chat quiz state: chat_id -> {
+#   "questions": [...], "index": int,
+#   "started_at": float | None,  # time.monotonic() when Q1 was sent (quiz clock starts here)
+#   "correct_count": int,        # right answers so far
+# }
 _sessions: dict[int, dict] = {}
 
 
@@ -238,9 +243,23 @@ async def post_join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not TEST_CHANNEL_ID:
         await update.message.reply_text(
-            "TEST_CHANNEL_ID isn't configured -- can't post. Set it to your test channel's numeric ID."
+            "TEST_CHANNEL_ID isn't configured -- can't post. Set it to your test channel's numeric ID or @username."
         )
         return
+
+    # The Bot API's chat_id needs either a numeric ID, or a username WITH
+    # the leading "@" -- a bare username string ("test_channelmania") is
+    # not a recognized chat identifier and comes back as "chat not found",
+    # even though Telethon (used elsewhere in this project, via a user
+    # session) is more lenient and accepts it without the "@". Normalize
+    # here so either form works in the secret.
+    raw_channel = TEST_CHANNEL_ID.strip()
+    if raw_channel.lstrip("-").isdigit():
+        target_chat_id = int(raw_channel)  # numeric ID, e.g. -1001234567890
+    elif raw_channel.startswith("@"):
+        target_chat_id = raw_channel
+    else:
+        target_chat_id = f"@{raw_channel}"  # bare username -> add the required "@"
 
     # A fresh payload each time, so old deep links from a previous test
     # don't get confused with the current one in your run_challenge.py logs.
@@ -251,7 +270,7 @@ async def post_join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Join Challenge Now", url=deep_link)]])
 
     try:
-        await context.bot.send_message(chat_id=TEST_CHANNEL_ID, text=post_text, reply_markup=keyboard)
+        await context.bot.send_message(chat_id=target_chat_id, text=post_text, reply_markup=keyboard)
     except Exception as e:
         log.error(f"Failed to post to test channel: {e}")
         await update.message.reply_text(
@@ -275,7 +294,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info(f"/start received from chat {chat_id}, payload={payload}")
 
     questions = random.sample(QUESTION_BANK, TOTAL_QUESTIONS)
-    _sessions[chat_id] = {"questions": questions, "index": 0}
+    _sessions[chat_id] = {
+        "questions": questions,
+        "index": 0,
+        "started_at": None,  # set when START QUIZ is tapped and Q1 goes out
+        "correct_count": 0,
+    }
 
     welcome_text = (
         "📚 Welcome to My Personal Challenge Guys! 📊\n"
@@ -299,25 +323,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not session:
             await query.message.reply_text("Session expired -- send /start again.")
             return
+        session["started_at"] = time.monotonic()  # quiz clock starts as Q1 goes out
         text, markup = build_question_message(0, session["questions"])
         await query.message.reply_text(text, reply_markup=markup)
         return
 
     if data.startswith("answer:"):
-        _, q_index_str, _chosen_str = data.split(":")
+        _, q_index_str, chosen_str = data.split(":")
         q_index = int(q_index_str)
+        chosen = int(chosen_str)
 
         session = _sessions.get(chat_id)
         if not session:
             await query.message.reply_text("Session expired -- send /start again.")
             return
 
+        if chosen == session["questions"][q_index]["correct"]:
+            session["correct_count"] += 1
+
         next_index = q_index + 1
         if next_index < TOTAL_QUESTIONS:
             text, markup = build_question_message(next_index, session["questions"])
             await query.message.reply_text(text, reply_markup=markup)
         else:
-            await query.message.reply_text("🏁 Challenge complete! (TEST) Thanks for testing.")
+            # Quiz done -- report score and how long it took start-to-finish.
+            # started_at is set when Q1 went out (START QUIZ tap), so this
+            # is exactly the answering window, not time spent on /start
+            # or reading the welcome message.
+            started_at = session.get("started_at")
+            elapsed_seconds = time.monotonic() - started_at if started_at else None
+            score = session["correct_count"]
+
+            if elapsed_seconds is not None:
+                time_str = f"{elapsed_seconds:.1f}s"
+            else:
+                time_str = "unknown (clock wasn't started)"
+
+            log.info(
+                f"Challenge complete in chat {chat_id}: score {score}/{TOTAL_QUESTIONS}, "
+                f"time {time_str}"
+            )
+            await query.message.reply_text(
+                "🏁 Challenge complete! (TEST)\n"
+                f"Score: {score}/{TOTAL_QUESTIONS}\n"
+                f"Time: {time_str}\n"
+                "Thanks for testing."
+            )
             _sessions.pop(chat_id, None)
 
 
