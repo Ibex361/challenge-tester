@@ -26,7 +26,8 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.custom import Message
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 
 # ----------------------------------------------------------------------
@@ -119,7 +120,7 @@ class StageFailure(Exception):
 # Gemini: ask which option letter is correct, with strict output + retry
 # ----------------------------------------------------------------------
 
-genai.configure(api_key=GEMINI_API_KEY)
+_gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in case
 
@@ -143,13 +144,16 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
     """
     valid_letters = _LETTERS[: len(options)]
 
-    model = genai.GenerativeModel(
-        GEMINI_MODEL,
-        generation_config={
-            "temperature": 0,
-            "response_mime_type": "text/x.enum",
-            "response_schema": {"type": "STRING", "enum": valid_letters},
-        },
+    # thinking_level="minimal" turns off Gemini 3's internal reasoning pass
+    # for this call. Without it, Flash/Flash-Lite models default to a
+    # "medium"-depth thinking pass even for a trivial 4-way multiple-choice
+    # classification, which is what caused the multi-second/tens-of-seconds
+    # variance seen between questions -- not network latency.
+    generation_config = genai_types.GenerateContentConfig(
+        temperature=0,
+        response_mime_type="text/x.enum",
+        response_schema={"type": "STRING", "enum": valid_letters},
+        thinking_config=genai_types.ThinkingConfig(thinking_level="minimal"),
     )
 
     prompt = _build_prompt(question_text, options)
@@ -165,7 +169,11 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
         last_error = None
         for attempt in range(1, max_attempts + 1):
             try:
-                return model.generate_content(prompt)
+                return _gemini_client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=generation_config,
+                )
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts:
