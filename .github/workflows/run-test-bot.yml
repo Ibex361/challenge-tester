@@ -32,4 +32,6 @@ jobs:
         env:
           TEST_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
           TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.run_minutes }}
+          TEST_CHANNEL_ID: ${{ secrets.TEST_CHANNEL_ID }}
+          TEST_ADMIN_USER_ID: ${{ secrets.TEST_ADMIN_USER_ID }}
         run: python test_bot.py

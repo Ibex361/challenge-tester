@@ -10,15 +10,18 @@ and exercise the exact same code paths (URL-button deep link, callback
 button clicks, question/answer flow) as it does against production.
 
 Flow it implements (mirrors the real bot):
-  1. You (manually) post a message to the test channel with a URL button
-     that deep-links to this bot: t.me/<this_bot>?start=<payload>
-     (Step-by-step text for that post is provided separately.)
-  2. Someone opens that link -> Telegram sends this bot /start <payload>.
-  3. Bot replies with a welcome message + a "START QUIZ" callback button.
-  4. On that click, sends Question 1/5 with A-D callback-button options,
+  0. You message this bot privately with /post_join -- it posts the
+     "Join Challenge" message (with a URL button deep-linking to itself)
+     into your test channel for you, same convenience your real bot gives
+     you for the real channel. Requires the bot to be a channel admin
+     with "Post Messages" permission, and TEST_CHANNEL_ID +
+     TEST_ADMIN_USER_ID to be set (see config below).
+  1. Someone opens that link -> Telegram sends this bot /start <payload>.
+  2. Bot replies with a welcome message + a "START QUIZ" callback button.
+  3. On that click, sends Question 1/5 with A-D callback-button options,
      pulled from a small built-in bank of random forex questions.
-  5. On each answer click (whatever was picked), sends the next question.
-  6. After Question 5's answer, sends a "Challenge complete" message.
+  4. On each answer click (whatever was picked), sends the next question.
+  5. After Question 5's answer, sends a "Challenge complete" message.
 
 Runs for a bounded window then exits -- meant to be started right before
 you post to the test channel, and left running for the length of your
@@ -44,6 +47,16 @@ log = logging.getLogger("test_bot")
 
 BOT_TOKEN = os.environ["TEST_BOT_TOKEN"]
 RUN_MINUTES = float(os.environ.get("TEST_BOT_RUN_MINUTES", "10"))
+
+# Needed only for the /post_join command (posting the "Join Challenge"
+# message to your test channel on your behalf). TEST_CHANNEL_ID is the
+# numeric channel ID (e.g. "-1001234567890"). TEST_ADMIN_USER_ID restricts
+# who can trigger it -- your own numeric Telegram user ID (get it from
+# @userinfobot). If TEST_ADMIN_USER_ID isn't set, /post_join is disabled
+# entirely rather than left open to anyone who messages the bot.
+TEST_CHANNEL_ID = os.environ.get("TEST_CHANNEL_ID")
+TEST_ADMIN_USER_ID = os.environ.get("TEST_ADMIN_USER_ID")
+TEST_BOT_USERNAME = os.environ.get("TEST_BOT_USERNAME", "birrforex_challenge_test_bot")
 
 # ----------------------------------------------------------------------
 # Random forex question bank -- for testing Gemini's answering ability,
@@ -198,6 +211,59 @@ def build_question_message(q_index: int, questions: list[dict]) -> tuple[str, In
     return text, InlineKeyboardMarkup(buttons)
 
 
+async def post_join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Message this bot privately with /post_join and it posts the
+    "Join Challenge" message (with the deep-link URL button) into your
+    test channel for you -- same convenience your real bot gives you,
+    just for the test channel.
+
+    Restricted to TEST_ADMIN_USER_ID. If that's not configured, this
+    command is disabled entirely (fail-closed, not open to anyone who
+    finds the bot).
+    """
+    sender_id = update.effective_user.id if update.effective_user else None
+
+    if not TEST_ADMIN_USER_ID:
+        await update.message.reply_text(
+            "/post_join is disabled: TEST_ADMIN_USER_ID isn't configured. "
+            "Set it to your numeric Telegram user ID (from @userinfobot) to enable this."
+        )
+        return
+
+    if str(sender_id) != str(TEST_ADMIN_USER_ID):
+        log.warning(f"/post_join attempted by unauthorized user {sender_id}")
+        await update.message.reply_text("Not authorized to use this command.")
+        return
+
+    if not TEST_CHANNEL_ID:
+        await update.message.reply_text(
+            "TEST_CHANNEL_ID isn't configured -- can't post. Set it to your test channel's numeric ID."
+        )
+        return
+
+    # A fresh payload each time, so old deep links from a previous test
+    # don't get confused with the current one in your run_challenge.py logs.
+    payload = f"test_challenge_{int(random.random() * 1_000_000)}"
+    deep_link = f"https://t.me/{TEST_BOT_USERNAME}?start={payload}"
+
+    post_text = "📢 Join Challenge Now! (TEST)"
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Join Challenge Now", url=deep_link)]])
+
+    try:
+        await context.bot.send_message(chat_id=TEST_CHANNEL_ID, text=post_text, reply_markup=keyboard)
+    except Exception as e:
+        log.error(f"Failed to post to test channel: {e}")
+        await update.message.reply_text(
+            f"Couldn't post to the channel: {e}\n\n"
+            "Common cause: this bot isn't an admin of the test channel yet, "
+            "or doesn't have 'Post Messages' permission."
+        )
+        return
+
+    await update.message.reply_text(f"Posted to the test channel.\nDeep link used: {deep_link}")
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handles /start <payload> -- this is what a real user's tap on the
@@ -258,6 +324,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def run_for_a_while():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("post_join", post_join_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     await app.initialize()
