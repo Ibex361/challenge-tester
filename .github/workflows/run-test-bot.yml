@@ -1,0 +1,35 @@
+name: Run Test Bot
+
+on:
+  # Manual only -- start this right before you post to your test channel,
+  # then run "Run Challenge Tester" (pointed at the test channel/bot)
+  # while this is still running.
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: "How many minutes the test bot should stay listening"
+        type: string
+        default: "10"
+
+jobs:
+  run-test-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # safety cap above run_minutes
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-test-bot.txt
+
+      - name: Run test bot
+        env:
+          TEST_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
+          TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.run_minutes }}
+        run: python test_bot.py
