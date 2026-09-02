@@ -154,8 +154,34 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
 
     prompt = _build_prompt(question_text, options)
 
+    def _call_gemini():
+        """
+        One raw call to the API. Retries a couple of times on a transient
+        exception (network blip, momentary API hiccup, etc.) before giving
+        up -- this is about the call itself failing, separate from the
+        call succeeding but returning text we can't parse (handled below).
+        """
+        max_attempts = 3
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return model.generate_content(prompt)
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts:
+                    log(
+                        f"Gemini answer ({attempt_label})",
+                        "INFO",
+                        f"API call failed ({e.__class__.__name__}), retrying (attempt {attempt}/{max_attempts})",
+                    )
+                    time.sleep(2)
+        raise StageFailure(
+            f"Gemini answer ({attempt_label})",
+            f"Gemini API call failed after {max_attempts} attempts: {last_error}",
+        )
+
     def _try_once():
-        resp = model.generate_content(prompt)
+        resp = _call_gemini()
         text = (resp.text or "").strip().upper()
         match = re.search(r"[A-F]", text)
         return match.group(0) if match else None
@@ -496,6 +522,8 @@ async def main():
 
             answer_letter = ask_gemini_for_answer(question_text, options, stage)
             answer_index = _LETTERS.index(answer_letter)
+            answer_text = options[answer_index] if answer_index < len(options) else "?"
+            log(stage, "INFO", f"Gemini's answer: {answer_letter}) {answer_text}")
 
             if q_num == TOTAL_QUESTIONS:
                 elapsed = time.monotonic() - start_quiz_click_time
