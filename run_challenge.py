@@ -39,8 +39,19 @@ API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-CHALLENGE_BOT_USERNAME = os.environ["CHALLENGE_BOT_USERNAME"]  # e.g. "birrforex_challenge_bot" (no @)
-CHALLENGE_NUMBER = os.environ["CHALLENGE_NUMBER"]              # e.g. "34" -> sends "/start challenge_34"
+TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
+
+# In test mode, we talk to the throwaway test_bot.py instead of the real
+# challenge bot, and skip requiring a challenge number entirely -- test_bot.py
+# doesn't validate the /start payload at all (see test_bot.py's start_command),
+# so any fixed payload works.
+if TEST_MODE:
+    CHALLENGE_BOT_USERNAME = os.environ.get("TEST_BOT_USERNAME", "birrforex_challenge_test_bot")
+    CHALLENGE_NUMBER = "test"
+else:
+    CHALLENGE_BOT_USERNAME = os.environ["CHALLENGE_BOT_USERNAME"]  # e.g. "birrforex_challenge_bot" (no @)
+    CHALLENGE_NUMBER = os.environ["CHALLENGE_NUMBER"]              # e.g. "34" -> sends "/start challenge_34"
+
 START_QUIZ_TEXT_HINTS = os.environ.get(
     "START_QUIZ_TEXT_HINTS", "start quiz,start"
 ).split(",")
@@ -48,10 +59,24 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "15"))
 
-# Overall deadline: the workflow starts the process; this env var tells the
-# script the wall-clock UTC time it must give up by (ISO 8601). Falls back
-# to "listen for 15 minutes from now" if not provided, so local testing works.
-DEADLINE_UTC_ISO = os.environ.get("DEADLINE_UTC_ISO")
+# ---- Stage 1 timing (real mode only; test mode ignores all of this) ----
+# The challenge bot rejects /start before it opens, replying with the exact
+# text in CHALLENGE_NOT_ACTIVE_TEXT. In real mode we don't message the bot
+# at all until CHALLENGE_OPEN_TIME_UTC, and we refuse to run entirely if
+# started too early -- this script isn't meant to sit idle for a long time.
+CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
+CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00")     # HH:MM, UTC
+EARLIEST_RUN_TIME_UTC = os.environ.get("EARLIEST_RUN_TIME_UTC", "16:45")        # HH:MM, UTC
+REAL_MODE_RETRY_DEADLINE_UTC = os.environ.get("REAL_MODE_RETRY_DEADLINE_UTC", "17:05")  # HH:MM, UTC
+REAL_MODE_RETRY_INTERVAL_SECONDS = float(os.environ.get("REAL_MODE_RETRY_INTERVAL_SECONDS", "10"))
+
+# Test mode has no clock -- just a flat time budget from whenever it starts.
+TEST_MODE_TIMEOUT_MINUTES = float(os.environ.get("TEST_MODE_TIMEOUT_MINUTES", "10"))
+
+# Once Start Quiz has been clicked, this is the separate time budget for the
+# quiz-answering phase (Stage 3) -- independent of the Stage 1/2 gating above,
+# since answering can legitimately run past the Stage 1/2 deadline once started.
+QUIZ_TIMEOUT_MINUTES = float(os.environ.get("QUIZ_TIMEOUT_MINUTES", "15"))
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
@@ -104,6 +129,13 @@ class StageFailure(Exception):
         self.stage = stage
         self.detail = detail
         super().__init__(f"{stage}: {detail}")
+
+
+def today_utc_at(hh_mm: str) -> datetime:
+    """Parses 'HH:MM' into a UTC datetime for the current UTC calendar day."""
+    hour, minute = (int(p) for p in hh_mm.split(":"))
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
 # ----------------------------------------------------------------------
@@ -357,52 +389,89 @@ async def wait_for_event_with_deadline(client, event_builder, deadline_dt, stage
         client.remove_event_handler(handler, event_builder)
 
 
-async def wait_for_message_with_button(client, event_builder, hints, deadline_dt, stage_name):
+async def message_bot_with_retry_until_active(
+    client, challenge_bot, start_command, hints, deadline_dt, retry_interval_seconds, stage_name,
+):
     """
-    Some bots send several messages in a row (e.g. a plain welcome message,
-    THEN a separate message with the button we actually want). This keeps
-    listening — across multiple incoming messages if needed — until one of
-    them has a button matching `hints`, or the deadline passes.
+    Sends `start_command` to the bot, then waits for its reply. Some bots
+    reply immediately with a rejection (e.g. "This challenge is not active
+    yet.") if messaged too early -- if that happens, this waits
+    `retry_interval_seconds` and sends the command again, repeating until
+    either a message with a matching button (`hints`) arrives, or
+    `deadline_dt` passes.
 
     Returns (message, (row, col)) for the matched button.
     """
-    remaining = (deadline_dt - datetime.now(timezone.utc)).total_seconds()
-    if remaining <= 0:
-        raise StageFailure(stage_name, "deadline already passed")
-
     result_fut = asyncio.get_event_loop().create_future()
 
     async def handler(event):
+        if result_fut.done():
+            return
         msg = event.message
         loc = find_button_by_hints(msg, hints)
-        if loc is not None and not result_fut.done():
+        if loc is not None:
             result_fut.set_result((msg, loc))
+            return
+        text = (msg.text or "").strip()
+        preview = text.replace("\n", " ")[:60]
+        if CHALLENGE_NOT_ACTIVE_TEXT in text:
+            log(stage_name, "INFO", "bot reports the challenge is not active yet -- will retry")
         else:
-            # Message arrived but didn't have the button we want yet —
-            # log it and keep waiting for the next one.
-            preview = (msg.text or "").strip().replace("\n", " ")[:60]
             log(stage_name, "INFO", f"message received without matching button, still waiting (preview: '{preview}')")
 
-    client.add_event_handler(handler, event_builder)
+    client.add_event_handler(handler, events.NewMessage(chats=challenge_bot))
     try:
-        log(stage_name, "START", f"waiting up to {int(remaining)}s")
-        msg, loc = await asyncio.wait_for(result_fut, timeout=remaining)
-        log(stage_name, "OK", f"found matching button at row {loc[0]}, col {loc[1]}")
-        return msg, loc
-    except asyncio.TimeoutError:
-        log(stage_name, "TIMEOUT", f"no message with a matching button before deadline ({deadline_dt.isoformat()})")
-        raise StageFailure(stage_name, "timed out waiting for a message with the expected button")
+        attempt = 1
+        while True:
+            remaining = (deadline_dt - datetime.now(timezone.utc)).total_seconds()
+            if remaining <= 0:
+                log(stage_name, "TIMEOUT", f"no matching message before deadline ({deadline_dt.isoformat()})")
+                raise StageFailure(stage_name, "timed out waiting for a message with the expected button")
+
+            await client.send_message(challenge_bot, start_command)
+            log(stage_name, "INFO", f"sent '{start_command}' (attempt {attempt})")
+
+            wait_for = min(remaining, retry_interval_seconds)
+            try:
+                msg, loc = await asyncio.wait_for(asyncio.shield(result_fut), timeout=wait_for)
+                log(stage_name, "OK", f"found matching button at row {loc[0]}, col {loc[1]} (attempt {attempt})")
+                return msg, loc
+            except asyncio.TimeoutError:
+                attempt += 1
+                continue
     finally:
-        client.remove_event_handler(handler, event_builder)
+        client.remove_event_handler(handler, events.NewMessage(chats=challenge_bot))
 
 
 async def main():
-    if DEADLINE_UTC_ISO:
-        deadline = datetime.fromisoformat(DEADLINE_UTC_ISO)
-        if deadline.tzinfo is None:
-            deadline = deadline.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+
+    if TEST_MODE:
+        # No clock gating at all -- contact the bot immediately, give up
+        # after a flat time budget from right now.
+        deadline = now + timedelta(minutes=TEST_MODE_TIMEOUT_MINUTES)
     else:
-        deadline = datetime.now(timezone.utc) + timedelta(minutes=15)
+        earliest_run_time = today_utc_at(EARLIEST_RUN_TIME_UTC)
+        open_time = today_utc_at(CHALLENGE_OPEN_TIME_UTC)
+        deadline = today_utc_at(REAL_MODE_RETRY_DEADLINE_UTC)
+
+        if now < earliest_run_time:
+            raise StageFailure(
+                "Startup check",
+                f"it's {now.strftime('%H:%M:%S')} UTC, which is before {EARLIEST_RUN_TIME_UTC} UTC "
+                f"({EARLIEST_RUN_TIME_UTC} is the earliest this is allowed to start). "
+                f"Trigger the workflow again closer to {CHALLENGE_OPEN_TIME_UTC} UTC.",
+            )
+
+        if now < open_time:
+            sleep_seconds = (open_time - now).total_seconds()
+            log("Startup check", "INFO",
+                f"started at {now.strftime('%H:%M:%S')} UTC; waiting {int(sleep_seconds)}s until "
+                f"{CHALLENGE_OPEN_TIME_UTC} UTC before messaging the bot")
+            await asyncio.sleep(sleep_seconds)
+        else:
+            log("Startup check", "INFO",
+                f"started at {now.strftime('%H:%M:%S')} UTC, at/after {CHALLENGE_OPEN_TIME_UTC} UTC -- messaging the bot now")
 
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.start()
@@ -410,7 +479,8 @@ async def main():
 
     try:
         challenge_bot = await client.get_entity(CHALLENGE_BOT_USERNAME)
-        log("Resolve bot", "INFO", f"resolved '@{CHALLENGE_BOT_USERNAME}' -> id={challenge_bot.id}")
+        mode_note = " (TEST MODE)" if TEST_MODE else ""
+        log("Resolve bot", "INFO", f"resolved '@{CHALLENGE_BOT_USERNAME}' -> id={challenge_bot.id}{mode_note}")
 
         if DEBUG_LOG_ALL_EVENTS:
             async def _debug_any_event(event):
@@ -425,31 +495,37 @@ async def main():
             client.add_event_handler(_debug_any_event, events.NewMessage())
             log("DEBUG mode", "INFO", "logging ALL incoming events (any chat) alongside normal stages")
 
-        # ---- Stage 1: message the bot directly with the challenge payload ----
+        # ---- Stage 1 + 2: message the bot, retry if not active yet, wait for Start Quiz ----
         # No more listening on any channel -- we go straight to the bot the
         # same way a real tap on the channel's Join button would have,
         # replicating exactly what click_button_or_follow_deep_link() did
         # for a URL button: send "/start challenge_<N>" to the bot.
+        #
+        # In real mode the bot may reply "This challenge is not active yet."
+        # if we're a beat early -- we keep resending until either the
+        # "Start Quiz" button shows up or the deadline passes. In test mode
+        # the test bot never rejects, so this resolves on the first attempt.
         start_command = f"/start challenge_{CHALLENGE_NUMBER}"
-        await client.send_message(challenge_bot, start_command)
-        log("Message bot", "OK", f"sent '{start_command}' to @{CHALLENGE_BOT_USERNAME}")
-
-        # ---- Stage 2: wait for "Start Quiz" from the challenge bot ----
-        # The bot may send a plain "Welcome" message FIRST with no button,
-        # then a separate message with the "START QUIZ" button -- so we keep
-        # listening across messages until one of them actually has the
-        # button we want. Scoped to just this bot's chat now.
-        start_quiz_message, loc = await wait_for_message_with_button(
+        retry_interval = 3.0 if TEST_MODE else REAL_MODE_RETRY_INTERVAL_SECONDS
+        start_quiz_message, loc = await message_bot_with_retry_until_active(
             client,
-            events.NewMessage(chats=challenge_bot),
+            challenge_bot,
+            start_command,
             START_QUIZ_TEXT_HINTS,
             deadline,
-            "Wait for Start Quiz prompt",
+            retry_interval,
+            "Message bot / wait for Start Quiz",
         )
 
         await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
         start_quiz_click_time = time.monotonic()
         log("Click Start Quiz", "OK", f"timer started")
+
+        # From here on, use a fresh deadline for the quiz-answering phase --
+        # it must not be truncated to whatever time was left on the Stage
+        # 1/2 gating deadline above (e.g. 17:05 UTC in real mode), since the
+        # quiz itself can legitimately run past that clock time once started.
+        quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
 
         # ---- Stage 3: answer each question ----
         for q_num in range(1, TOTAL_QUESTIONS + 1):
@@ -458,7 +534,7 @@ async def main():
             q_event = await wait_for_event_with_deadline(
                 client,
                 events.NewMessage(chats=challenge_bot),
-                deadline,
+                quiz_deadline,
                 f"{stage}: wait for question",
             )
             q_message: Message = q_event.message
