@@ -42,16 +42,13 @@ jobs:
       - name: Compute deadline
         id: deadline
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            # Scheduled run: listen until 8:05 PM EAT (17:05 UTC) today.
-            DEADLINE=$(date -u +"%Y-%m-%dT17:05:00+00:00")
-            echo "Scheduled run — deadline set to: $DEADLINE"
-          else
-            # Manual run (workflow_dispatch): listen for at most 15 minutes
-            # from now, whatever time it is.
-            DEADLINE=$(date -u -d "+15 minutes" +"%Y-%m-%dT%H:%M:%S+00:00")
-            echo "Manual run — deadline set to: $DEADLINE (15 min from now)"
-          fi
+          # Listen for 15 minutes from whenever this job actually starts.
+          # Deliberately NOT a fixed clock time: GitHub's cron scheduler
+          # doesn't guarantee an on-time start (schedule runs can be
+          # delayed, sometimes by hours during peak load), so a fixed
+          # deadline can already be in the past by the time the job begins.
+          DEADLINE=$(date -u -d "+15 minutes" +"%Y-%m-%dT%H:%M:%S+00:00")
+          echo "Deadline set to: $DEADLINE (15 min from actual start, trigger: ${{ github.event_name }})"
           echo "deadline=$DEADLINE" >> "$GITHUB_OUTPUT"
 
       - name: Run challenge flow
