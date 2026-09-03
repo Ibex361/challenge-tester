@@ -2,12 +2,13 @@ name: Run Test Bot
 
 on:
   # Manual only -- start this right before running "Run Challenge Tester" in
-  # test mode. Enter the SAME activation_time_utc value in both workflows:
-  # this bot rejects /start until that time, and the tester waits for it.
+  # test mode. Enter the SAME activation time (East Africa Time) in both
+  # workflows: this bot rejects /start until that time, and the tester
+  # waits for it.
   workflow_dispatch:
     inputs:
-      activation_time_utc:
-        description: "Activation time (HH:MM, UTC) -- /start is rejected before this. Must match the tester's test_activation_time_utc input."
+      activation_time_eat:
+        description: "Activation time (HH:MM, East Africa Time / UTC+3) -- /start is rejected before this. Must match the tester's test_activation_time_eat input."
         type: string
         required: true
       run_minutes:
@@ -32,11 +33,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-test-bot.txt
 
+      - name: Convert activation time from EAT to UTC
+        id: convert_time
+        run: |
+          eat_time="${{ github.event.inputs.activation_time_eat }}"
+          # EAT is a fixed UTC+3 year-round (no DST), so a flat 3-hour
+          # subtraction is always correct -- no timezone database needed.
+          utc_time=$(python3 -c "h,m=map(int,'$eat_time'.split(':')); t=(h*60+m-180)%1440; print(f'{t//60:02d}:{t%60:02d}')")
+          echo "Converted $eat_time EAT -> $utc_time UTC"
+          echo "utc_time=$utc_time" >> "$GITHUB_OUTPUT"
+
       - name: Run test bot
         env:
           TEST_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
           TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.run_minutes }}
-          TEST_ACTIVATION_TIME_UTC: ${{ github.event.inputs.activation_time_utc }}
+          TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.utc_time }}
           TEST_CHANNEL_ID: ${{ secrets.TEST_CHANNEL_ID }}
           TEST_ADMIN_USER_ID: ${{ secrets.TEST_ADMIN_USER_ID }}
         run: python test_bot.py

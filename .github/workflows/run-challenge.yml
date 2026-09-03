@@ -2,19 +2,19 @@ name: Run Challenge Tester
 
 on:
   # Manual only. In real mode, trigger any time from 15 minutes before
-  # 17:00 UTC onward -- the script waits until 17:00 UTC before messaging
-  # the bot, and refuses to start at all if triggered earlier than that.
-  # In test mode, enter the SAME activation_time_utc you gave "Run Test
-  # Bot" -- the tester follows the identical wait/refuse/retry behavior,
-  # just anchored to that time instead of 17:00.
+  # 17:00 UTC (8:00 PM EAT) onward -- the script waits until then before
+  # messaging the bot, and refuses to start at all if triggered earlier.
+  # In test mode, enter the SAME activation time (in East Africa Time) you
+  # gave "Run Test Bot" -- the tester follows the identical
+  # wait/refuse/retry behavior, just anchored to that time instead of 17:00.
   workflow_dispatch:
     inputs:
       test_mode:
         description: "Test mode: run against the throwaway test_bot.py instead of the real bot -- no challenge number needed"
         type: boolean
         default: false
-      test_activation_time_utc:
-        description: "Test mode only: activation time (HH:MM, UTC) -- must match what you gave 'Run Test Bot'"
+      test_activation_time_eat:
+        description: "Test mode only: activation time (HH:MM, East Africa Time / UTC+3) -- must match what you gave 'Run Test Bot'"
         type: string
         default: ""
       challenge_number:
@@ -57,9 +57,23 @@ jobs:
             echo "::error::challenge_number is required unless test_mode is checked."
             exit 1
           fi
-          if [ "${{ github.event.inputs.test_mode }}" == "true" ] && [ -z "${{ github.event.inputs.test_activation_time_utc }}" ]; then
-            echo "::error::test_activation_time_utc is required when test_mode is checked -- use the same value you gave 'Run Test Bot'."
+          if [ "${{ github.event.inputs.test_mode }}" == "true" ] && [ -z "${{ github.event.inputs.test_activation_time_eat }}" ]; then
+            echo "::error::test_activation_time_eat is required when test_mode is checked -- use the same value you gave 'Run Test Bot'."
             exit 1
+          fi
+
+      - name: Convert activation time from EAT to UTC
+        id: convert_time
+        run: |
+          eat_time="${{ github.event.inputs.test_activation_time_eat }}"
+          if [ -n "$eat_time" ]; then
+            # EAT is a fixed UTC+3 year-round (no DST), so a flat 3-hour
+            # subtraction is always correct -- no timezone database needed.
+            utc_time=$(python3 -c "h,m=map(int,'$eat_time'.split(':')); t=(h*60+m-180)%1440; print(f'{t//60:02d}:{t%60:02d}')")
+            echo "Converted $eat_time EAT -> $utc_time UTC"
+            echo "utc_time=$utc_time" >> "$GITHUB_OUTPUT"
+          else
+            echo "utc_time=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run challenge flow
@@ -69,7 +83,7 @@ jobs:
           TG_SESSION: ${{ secrets.TG_SESSION }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
-          TEST_ACTIVATION_TIME_UTC: ${{ github.event.inputs.test_activation_time_utc }}
+          TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.utc_time }}
           TEST_BOT_USERNAME: ${{ secrets.TEST_BOT_USERNAME }}
           CHALLENGE_BOT_USERNAME: ${{ secrets.CHALLENGE_BOT_USERNAME }}
           CHALLENGE_NUMBER: ${{ github.event.inputs.challenge_number }}
