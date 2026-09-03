@@ -15,6 +15,7 @@ Every stage logs clearly to stdout AND to the GitHub Actions job summary
 """
 
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -142,6 +143,43 @@ def flush_summary(overall_result: str):
         f.write("|---|---|---|---|\n")
         f.write("\n".join(_summary_lines))
         f.write("\n")
+
+
+class _TelethonFloodWaitLogHandler(logging.Handler):
+    """
+    Telethon auto-sleeps through FloodWaitError/SlowModeWaitError as long as
+    the wait is under its flood_sleep_threshold (60s by default) -- it does
+    this INSIDE the request call (e.g. send_message), silently, with no
+    exception raised. Without this handler, a flood-wait shows up as nothing
+    more than an unexplained multi-second gap between two log lines, which
+    is confusing to diagnose (e.g. "why did attempt 11 take 40s longer than
+    attempt 10?" -- it didn't; Telethon was sleeping through a flood wait
+    inside that call).
+
+    Telethon logs these internally at INFO level with the message template
+    "Sleeping%s for %ds (%s) on %s flood wait" (see
+    telethon/client/users.py's _fmt_flood/_call) -- this handler catches
+    just that record and re-emits it through our own log(), so it appears
+    inline in the same timestamped stage log instead of being silently
+    absorbed.
+    """
+    def emit(self, record):
+        message = record.getMessage()
+        if "flood wait" in message.lower():
+            log("Telegram flood wait", "INFO", f"{message} -- this explains any gap before the next stage line")
+
+
+def _install_telethon_flood_wait_logging():
+    """
+    Telethon's flood-wait sleep is logged via loggers named after the
+    originating module (e.g. "telethon.client.users") at INFO level.
+    Attaching to the "telethon" logger catches all of them regardless of
+    which submodule the request came from, without needing every Telethon
+    submodule name kept in sync with the library's internals.
+    """
+    telethon_logger = logging.getLogger("telethon")
+    telethon_logger.setLevel(logging.INFO)
+    telethon_logger.addHandler(_TelethonFloodWaitLogHandler())
 
 
 class StageFailure(Exception):
@@ -476,6 +514,8 @@ async def message_bot_with_retry_until_active(
 
 
 async def main():
+    _install_telethon_flood_wait_logging()
+
     now = datetime.now(timezone.utc)
 
     open_time = today_utc_at(OPEN_TIME_UTC)
