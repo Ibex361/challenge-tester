@@ -333,10 +333,15 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     # JSON Schema mode with strict=True forces the model to return exactly
     # {"answer": "<one of the valid letters>"} -- no free text, no
     # explanation, nothing to parse out with a regex. reasoning_effort="low"
-    # is the lowest effort level Groq's live API actually accepts for this
-    # model ("none" looked valid in the SDK's type hints but is rejected by
-    # the API itself with a 400) -- this keeps the "skip most of the
-    # thinking pass" speed goal while working against the real endpoint.
+    # is the lowest level Groq's live API accepts for this model ("none" is
+    # listed in some SDK type hints but the live API rejects it with a 400).
+    # Important: gpt-oss-20b ALWAYS spends some tokens reasoning before the
+    # JSON answer, even at "low" -- those reasoning tokens count against
+    # max_completion_tokens. A too-low budget (e.g. 20) gets cut off mid-
+    # reasoning before any JSON is written, causing a strict-mode
+    # json_validate_failed 400. Give it enough headroom for the reasoning
+    # pass plus the short JSON answer; 300 is comfortably enough for a
+    # single-letter answer at low effort while still being fast.
     response_format = {
         "type": "json_schema",
         "json_schema": {
@@ -362,7 +367,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
                     model=GROQ_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0,
-                    max_completion_tokens=20,
+                    max_completion_tokens=300,
                     response_format=response_format,
                     reasoning_effort="low",
                 )
