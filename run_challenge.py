@@ -332,9 +332,11 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
 
     # JSON Schema mode with strict=True forces the model to return exactly
     # {"answer": "<one of the valid letters>"} -- no free text, no
-    # explanation, nothing to parse out with a regex. reasoning_effort="none"
-    # skips gpt-oss-20b's internal "thinking" pass entirely, which is where
-    # most of the latency would otherwise go for a model built to reason.
+    # explanation, nothing to parse out with a regex. reasoning_effort="low"
+    # is the lowest effort level Groq's live API actually accepts for this
+    # model ("none" looked valid in the SDK's type hints but is rejected by
+    # the API itself with a 400) -- this keeps the "skip most of the
+    # thinking pass" speed goal while working against the real endpoint.
     response_format = {
         "type": "json_schema",
         "json_schema": {
@@ -362,7 +364,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
                     temperature=0,
                     max_completion_tokens=20,
                     response_format=response_format,
-                    reasoning_effort="none",
+                    reasoning_effort="low",
                 )
             except Exception as e:
                 last_error = e
