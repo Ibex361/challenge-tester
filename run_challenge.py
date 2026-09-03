@@ -461,6 +461,7 @@ async def main():
         # No clock gating at all -- contact the bot immediately, give up
         # after a flat time budget from right now.
         deadline = now + timedelta(minutes=TEST_MODE_TIMEOUT_MINUTES)
+        open_time = None
     else:
         earliest_run_time = today_utc_at(EARLIEST_RUN_TIME_UTC)
         open_time = today_utc_at(CHALLENGE_OPEN_TIME_UTC)
@@ -473,16 +474,6 @@ async def main():
                 f"({EARLIEST_RUN_TIME_UTC} is the earliest this is allowed to start). "
                 f"Trigger the workflow again closer to {CHALLENGE_OPEN_TIME_UTC} UTC.",
             )
-
-        if now < open_time:
-            sleep_seconds = (open_time - now).total_seconds()
-            log("Startup check", "INFO",
-                f"started at {now.strftime('%H:%M:%S')} UTC; waiting {int(sleep_seconds)}s until "
-                f"{CHALLENGE_OPEN_TIME_UTC} UTC before messaging the bot")
-            await asyncio.sleep(sleep_seconds)
-        else:
-            log("Startup check", "INFO",
-                f"started at {now.strftime('%H:%M:%S')} UTC, at/after {CHALLENGE_OPEN_TIME_UTC} UTC -- messaging the bot now")
 
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.start()
@@ -505,6 +496,21 @@ async def main():
                     f"chat_id={chat_id} title='{chat_title}' has_buttons={has_buttons} preview='{preview}'")
             client.add_event_handler(_debug_any_event, events.NewMessage())
             log("DEBUG mode", "INFO", "logging ALL incoming events (any chat) alongside normal stages")
+
+        # Login and bot resolution are done above, BEFORE this sleep, so the
+        # very first "/start challenge_<N>" send below happens as close to
+        # CHALLENGE_OPEN_TIME_UTC as possible -- not delayed by connecting
+        # to Telegram or resolving the bot entity after the clock hits it.
+        if not TEST_MODE and now < open_time:
+            sleep_seconds = (open_time - datetime.now(timezone.utc)).total_seconds()
+            if sleep_seconds > 0:
+                log("Startup check", "INFO",
+                    f"logged in and ready; waiting {int(sleep_seconds)}s until "
+                    f"{CHALLENGE_OPEN_TIME_UTC} UTC before messaging the bot")
+                await asyncio.sleep(sleep_seconds)
+        elif not TEST_MODE:
+            log("Startup check", "INFO",
+                f"started at {now.strftime('%H:%M:%S')} UTC, at/after {CHALLENGE_OPEN_TIME_UTC} UTC -- messaging the bot now")
 
         # ---- Stage 1 + 2: message the bot, retry if not active yet, wait for Start Quiz ----
         # No more listening on any channel -- we go straight to the bot the
