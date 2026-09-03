@@ -29,6 +29,17 @@ on:
         description: "Gemini model override (e.g. gemini-3.5-flash-lite). Leave blank to use the script's default."
         type: string
         default: ""
+      ai_provider:
+        description: "Which AI answers the quiz: groq (fast) or gemini (fallback)"
+        type: choice
+        options:
+          - groq
+          - gemini
+        default: groq
+      groq_model:
+        description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
+        type: string
+        default: ""
 
 jobs:
   run-challenge:
@@ -82,6 +93,8 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ secrets.TG_SESSION }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
           TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.utc_time }}
           TEST_BOT_USERNAME: ${{ secrets.TEST_BOT_USERNAME }}
@@ -96,5 +109,11 @@ jobs:
             echo "Using GEMINI_MODEL override: $GEMINI_MODEL"
           else
             echo "No gemini_model input given -- using the script's built-in default"
+          fi
+          if [ -n "${{ github.event.inputs.groq_model }}" ]; then
+            export GROQ_MODEL="${{ github.event.inputs.groq_model }}"
+            echo "Using GROQ_MODEL override: $GROQ_MODEL"
+          else
+            echo "No groq_model input given -- using the script's built-in default"
           fi
           python run_challenge.py

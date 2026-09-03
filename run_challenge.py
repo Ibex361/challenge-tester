@@ -29,6 +29,7 @@ from telethon.tl.custom import Message
 
 from google import genai
 from google.genai import types as genai_types
+from groq import Groq
 
 
 # ----------------------------------------------------------------------
@@ -39,6 +40,16 @@ API_ID = int(os.environ["TG_API_ID"])
 API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")  # only required if AI_PROVIDER=groq
+
+# Which AI answers the quiz questions. "groq" is the fast path (Groq's LPU
+# hardware gives far more consistent low latency than Gemini has shown in
+# testing); "gemini" is kept available as a fallback / for comparison.
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq").lower()
+if AI_PROVIDER not in ("groq", "gemini"):
+    raise SystemExit(f"AI_PROVIDER must be 'groq' or 'gemini', got {AI_PROVIDER!r}")
+if AI_PROVIDER == "groq" and not GROQ_API_KEY:
+    raise SystemExit("AI_PROVIDER=groq requires GROQ_API_KEY to be set.")
 
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 
@@ -101,6 +112,12 @@ if TEST_MODE and not OPEN_TIME_UTC:
 QUIZ_TIMEOUT_MINUTES = float(os.environ.get("QUIZ_TIMEOUT_MINUTES", "15"))
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# openai/gpt-oss-20b is Groq's fastest current production model (~1000
+# tokens/sec) that also supports strict JSON Schema output -- see
+# https://console.groq.com/docs/model/openai/gpt-oss-20b. Groq deprecated
+# llama-3.1-8b-instant (the previous fast/cheap option) on free and
+# developer tiers in August 2026; this is its recommended replacement.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
 # Temporary diagnostic switch: when true, logs EVERY incoming message across
 # every chat (not just the ones we're filtering for), so we can see exactly
@@ -198,10 +215,11 @@ def today_utc_at(hh_mm: str) -> datetime:
 
 
 # ----------------------------------------------------------------------
-# Gemini: ask which option letter is correct, with strict output + retry
+# Gemini / Groq: ask which option letter is correct, with strict output + retry
 # ----------------------------------------------------------------------
 
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+_groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in case
 
@@ -301,6 +319,103 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
         f"Gemini answer ({attempt_label})",
         f"could not get a valid option letter after retry (last raw value: {letter!r})",
     )
+
+
+def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
+    """
+    Groq equivalent of ask_gemini_for_answer(). Same shape, same return
+    value (a single option letter), so the call site doesn't need to know
+    which provider is in use.
+    """
+    valid_letters = _LETTERS[: len(options)]
+    prompt = _build_prompt(question_text, options)
+
+    # JSON Schema mode with strict=True forces the model to return exactly
+    # {"answer": "<one of the valid letters>"} -- no free text, no
+    # explanation, nothing to parse out with a regex. reasoning_effort="none"
+    # skips gpt-oss-20b's internal "thinking" pass entirely, which is where
+    # most of the latency would otherwise go for a model built to reason.
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "quiz_answer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string", "enum": valid_letters},
+                },
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    def _call_groq():
+        max_attempts = 3
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return _groq_client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    max_completion_tokens=20,
+                    response_format=response_format,
+                    reasoning_effort="none",
+                )
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts:
+                    log(
+                        f"Groq answer ({attempt_label})",
+                        "INFO",
+                        f"API call failed ({e.__class__.__name__}), retrying (attempt {attempt}/{max_attempts})",
+                    )
+                    time.sleep(0.5)
+        raise StageFailure(
+            f"Groq answer ({attempt_label})",
+            f"Groq API call failed after {max_attempts} attempts: {last_error}",
+        )
+
+    def _try_once():
+        resp = _call_groq()
+        raw = (resp.choices[0].message.content or "").strip()
+        try:
+            import json as _json
+            parsed = _json.loads(raw)
+            letter = str(parsed.get("answer", "")).strip().upper()
+        except Exception:
+            letter = ""
+        if letter not in valid_letters:
+            # Fall back to scanning for a bare letter, in case strict mode
+            # wasn't honored for some reason.
+            match = re.search(r"[A-F]", raw.upper())
+            letter = match.group(0) if match else None
+        return letter
+
+    letter = _try_once()
+    if letter in valid_letters:
+        log(f"Groq answer ({attempt_label})", "OK", f"chose {letter}")
+        return letter
+
+    log(f"Groq answer ({attempt_label})", "INFO", f"unparseable response '{letter}', retrying once")
+    letter = _try_once()
+    if letter in valid_letters:
+        log(f"Groq answer ({attempt_label}, retry)", "OK", f"chose {letter}")
+        return letter
+
+    raise StageFailure(
+        f"Groq answer ({attempt_label})",
+        f"could not get a valid option letter after retry (last raw value: {letter!r})",
+    )
+
+
+def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
+    """Dispatches to whichever provider AI_PROVIDER selects."""
+    if AI_PROVIDER == "groq":
+        return ask_groq_for_answer(question_text, options, attempt_label)
+    return ask_gemini_for_answer(question_text, options, attempt_label)
 
 
 # ----------------------------------------------------------------------
@@ -619,18 +734,18 @@ async def main():
             question_text = q_message.text or ""
             log(stage, "INFO", f"parsed {len(options)} options")
 
-            # ask_gemini_for_answer() is a blocking, synchronous call (network
+            # ask_ai_for_answer() is a blocking, synchronous call (network
             # I/O + time.sleep on retry). Run it in a worker thread so it
             # doesn't freeze this event loop -- otherwise Telethon can't
             # process anything else (including the eventual button click)
             # until the call returns, which is what caused the apparent
             # "stall" on Question 4.
             answer_letter = await asyncio.to_thread(
-                ask_gemini_for_answer, question_text, options, stage
+                ask_ai_for_answer, question_text, options, stage
             )
             answer_index = _LETTERS.index(answer_letter)
             answer_text = options[answer_index] if answer_index < len(options) else "?"
-            log(stage, "INFO", f"Gemini's answer: {answer_letter}) {answer_text}")
+            log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
 
             if q_num == TOTAL_QUESTIONS:
                 elapsed = time.monotonic() - start_quiz_click_time
