@@ -416,6 +416,13 @@ async def run_for_a_while():
     await app.updater.start_polling(
         allowed_updates=["message", "callback_query"],
         drop_pending_updates=True,
+        # Default long-poll timeout is 10s -- each getUpdates call blocks
+        # for up to that long waiting on new updates before returning, which
+        # is exactly the ~10s lag you'd see between /start and this bot's
+        # rejection/response. Shortened so the activation-time retry loop
+        # in run_challenge.py (which resends every couple seconds) actually
+        # gets picked up promptly instead of being bottlenecked here.
+        timeout=1,
     )
     log.info(f"Test bot is up and listening. Post to your test channel now. Will run for {RUN_MINUTES} minutes.")
 
