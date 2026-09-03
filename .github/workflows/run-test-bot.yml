@@ -1,11 +1,15 @@
 name: Run Test Bot
 
 on:
-  # Manual only -- start this right before you post to your test channel,
-  # then run "Run Challenge Tester" (pointed at the test channel/bot)
-  # while this is still running.
+  # Manual only -- start this right before running "Run Challenge Tester" in
+  # test mode. Enter the SAME activation_time_utc value in both workflows:
+  # this bot rejects /start until that time, and the tester waits for it.
   workflow_dispatch:
     inputs:
+      activation_time_utc:
+        description: "Activation time (HH:MM, UTC) -- /start is rejected before this. Must match the tester's test_activation_time_utc input."
+        type: string
+        required: true
       run_minutes:
         description: "How many minutes the test bot should stay listening"
         type: string
@@ -32,6 +36,7 @@ jobs:
         env:
           TEST_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
           TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.run_minutes }}
+          TEST_ACTIVATION_TIME_UTC: ${{ github.event.inputs.activation_time_utc }}
           TEST_CHANNEL_ID: ${{ secrets.TEST_CHANNEL_ID }}
           TEST_ADMIN_USER_ID: ${{ secrets.TEST_ADMIN_USER_ID }}
         run: python test_bot.py

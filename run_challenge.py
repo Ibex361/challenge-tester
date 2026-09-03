@@ -59,19 +59,40 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "15"))
 
-# ---- Stage 1 timing (real mode only; test mode ignores all of this) ----
-# The challenge bot rejects /start before it opens, replying with the exact
-# text in CHALLENGE_NOT_ACTIVE_TEXT. In real mode we don't message the bot
-# at all until CHALLENGE_OPEN_TIME_UTC, and we refuse to run entirely if
-# started too early -- this script isn't meant to sit idle for a long time.
+# ---- Stage 1 timing ----
+# The bot rejects /start before it opens, replying with the exact text in
+# CHALLENGE_NOT_ACTIVE_TEXT. We don't message the bot at all until the open
+# time, and we refuse to run entirely if started too early -- this script
+# isn't meant to sit idle for a long time waiting.
+#
+# Real mode and test mode both follow this exact same shape, just anchored
+# to a different open time:
+#   - real mode  -> CHALLENGE_OPEN_TIME_UTC        (default 17:00 UTC, the
+#                    real challenge's actual go-live time)
+#   - test mode  -> TEST_ACTIVATION_TIME_UTC        (whatever you set when
+#                    you start the test bot, e.g. "13:00" -- test_bot.py
+#                    enforces the exact same gate on its side, so test mode
+#                    exercises the identical early-run-refusal / wait /
+#                    retry-until-active behavior as a real run, just on a
+#                    time of your choosing instead of a fixed 17:00)
+#
+# EARLIEST_RUN_MINUTES_BEFORE_OPEN / RETRY_WINDOW_MINUTES_AFTER_OPEN are
+# shared by both modes -- 15 minutes early is too early to bother waiting
+# for, and 5 minutes of retrying after open time is enough to absorb the
+# bot being a beat late to actually activate.
 CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
-CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00")     # HH:MM, UTC
-EARLIEST_RUN_TIME_UTC = os.environ.get("EARLIEST_RUN_TIME_UTC", "16:45")        # HH:MM, UTC
-REAL_MODE_RETRY_DEADLINE_UTC = os.environ.get("REAL_MODE_RETRY_DEADLINE_UTC", "17:05")  # HH:MM, UTC
-REAL_MODE_RETRY_INTERVAL_SECONDS = float(os.environ.get("REAL_MODE_RETRY_INTERVAL_SECONDS", "10"))
+CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00")          # HH:MM, UTC -- real mode
+TEST_ACTIVATION_TIME_UTC = os.environ.get("TEST_ACTIVATION_TIME_UTC")                # HH:MM, UTC -- test mode
+EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "15"))
+RETRY_WINDOW_MINUTES_AFTER_OPEN = float(os.environ.get("RETRY_WINDOW_MINUTES_AFTER_OPEN", "5"))
+RETRY_INTERVAL_SECONDS = float(os.environ.get("RETRY_INTERVAL_SECONDS", "10"))
 
-# Test mode has no clock -- just a flat time budget from whenever it starts.
-TEST_MODE_TIMEOUT_MINUTES = float(os.environ.get("TEST_MODE_TIMEOUT_MINUTES", "10"))
+OPEN_TIME_UTC = TEST_ACTIVATION_TIME_UTC if TEST_MODE else CHALLENGE_OPEN_TIME_UTC
+if TEST_MODE and not OPEN_TIME_UTC:
+    raise SystemExit(
+        "TEST_ACTIVATION_TIME_UTC is required in test mode -- set it to the same "
+        "activation time (HH:MM, UTC) you gave the 'Run Test Bot' workflow."
+    )
 
 # Once Start Quiz has been clicked, this is the separate time budget for the
 # quiz-answering phase (Stage 3) -- independent of the Stage 1/2 gating above,
@@ -457,23 +478,18 @@ async def message_bot_with_retry_until_active(
 async def main():
     now = datetime.now(timezone.utc)
 
-    if TEST_MODE:
-        # No clock gating at all -- contact the bot immediately, give up
-        # after a flat time budget from right now.
-        deadline = now + timedelta(minutes=TEST_MODE_TIMEOUT_MINUTES)
-        open_time = None
-    else:
-        earliest_run_time = today_utc_at(EARLIEST_RUN_TIME_UTC)
-        open_time = today_utc_at(CHALLENGE_OPEN_TIME_UTC)
-        deadline = today_utc_at(REAL_MODE_RETRY_DEADLINE_UTC)
+    open_time = today_utc_at(OPEN_TIME_UTC)
+    earliest_run_time = open_time - timedelta(minutes=EARLIEST_RUN_MINUTES_BEFORE_OPEN)
+    deadline = open_time + timedelta(minutes=RETRY_WINDOW_MINUTES_AFTER_OPEN)
+    mode_label = "TEST MODE" if TEST_MODE else "real mode"
 
-        if now < earliest_run_time:
-            raise StageFailure(
-                "Startup check",
-                f"it's {now.strftime('%H:%M:%S')} UTC, which is before {EARLIEST_RUN_TIME_UTC} UTC "
-                f"({EARLIEST_RUN_TIME_UTC} is the earliest this is allowed to start). "
-                f"Trigger the workflow again closer to {CHALLENGE_OPEN_TIME_UTC} UTC.",
-            )
+    if now < earliest_run_time:
+        raise StageFailure(
+            "Startup check",
+            f"[{mode_label}] it's {now.strftime('%H:%M:%S')} UTC, which is more than "
+            f"{EARLIEST_RUN_MINUTES_BEFORE_OPEN:.0f} minutes before the {OPEN_TIME_UTC} UTC activation "
+            f"time. Trigger the workflow again closer to {OPEN_TIME_UTC} UTC.",
+        )
 
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.start()
@@ -481,8 +497,7 @@ async def main():
 
     try:
         challenge_bot = await client.get_entity(CHALLENGE_BOT_USERNAME)
-        mode_note = " (TEST MODE)" if TEST_MODE else ""
-        log("Resolve bot", "INFO", f"resolved '@{CHALLENGE_BOT_USERNAME}' -> id={challenge_bot.id}{mode_note}")
+        log("Resolve bot", "INFO", f"resolved '@{CHALLENGE_BOT_USERNAME}' -> id={challenge_bot.id} ({mode_label})")
 
         if DEBUG_LOG_ALL_EVENTS:
             async def _debug_any_event(event):
@@ -499,18 +514,19 @@ async def main():
 
         # Login and bot resolution are done above, BEFORE this sleep, so the
         # very first "/start challenge_<N>" send below happens as close to
-        # CHALLENGE_OPEN_TIME_UTC as possible -- not delayed by connecting
-        # to Telegram or resolving the bot entity after the clock hits it.
-        if not TEST_MODE and now < open_time:
+        # the activation time as possible -- not delayed by connecting to
+        # Telegram or resolving the bot entity after the clock hits it.
+        if now < open_time:
             sleep_seconds = (open_time - datetime.now(timezone.utc)).total_seconds()
             if sleep_seconds > 0:
                 log("Startup check", "INFO",
-                    f"logged in and ready; waiting {int(sleep_seconds)}s until "
-                    f"{CHALLENGE_OPEN_TIME_UTC} UTC before messaging the bot")
+                    f"[{mode_label}] logged in and ready; waiting {int(sleep_seconds)}s until "
+                    f"{OPEN_TIME_UTC} UTC before messaging the bot")
                 await asyncio.sleep(sleep_seconds)
-        elif not TEST_MODE:
+        else:
             log("Startup check", "INFO",
-                f"started at {now.strftime('%H:%M:%S')} UTC, at/after {CHALLENGE_OPEN_TIME_UTC} UTC -- messaging the bot now")
+                f"[{mode_label}] started at {now.strftime('%H:%M:%S')} UTC, at/after {OPEN_TIME_UTC} UTC "
+                f"-- messaging the bot now")
 
         # ---- Stage 1 + 2: message the bot, retry if not active yet, wait for Start Quiz ----
         # No more listening on any channel -- we go straight to the bot the
@@ -518,19 +534,19 @@ async def main():
         # replicating exactly what click_button_or_follow_deep_link() did
         # for a URL button: send "/start challenge_<N>" to the bot.
         #
-        # In real mode the bot may reply "This challenge is not active yet."
-        # if we're a beat early -- we keep resending until either the
-        # "Start Quiz" button shows up or the deadline passes. In test mode
-        # the test bot never rejects, so this resolves on the first attempt.
+        # The bot may reply "This challenge is not active yet." if we're a
+        # beat early -- we keep resending until either the "Start Quiz"
+        # button shows up or the deadline passes. In test mode, test_bot.py
+        # enforces the same activation-time gate, so this exercises the
+        # exact same retry behavior as a real run, not a simulation of it.
         start_command = f"/start challenge_{CHALLENGE_NUMBER}"
-        retry_interval = 3.0 if TEST_MODE else REAL_MODE_RETRY_INTERVAL_SECONDS
         start_quiz_message, loc = await message_bot_with_retry_until_active(
             client,
             challenge_bot,
             start_command,
             START_QUIZ_TEXT_HINTS,
             deadline,
-            retry_interval,
+            RETRY_INTERVAL_SECONDS,
             "Message bot / wait for Start Quiz",
         )
 

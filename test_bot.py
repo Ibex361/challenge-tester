@@ -34,6 +34,7 @@ import logging
 import os
 import random
 import time
+from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -49,6 +50,15 @@ log = logging.getLogger("test_bot")
 BOT_TOKEN = os.environ["TEST_BOT_TOKEN"]
 RUN_MINUTES = float(os.environ.get("TEST_BOT_RUN_MINUTES", "10"))
 
+# Mirrors run_challenge.py's real-mode gate: before this clock time (UTC),
+# /start is rejected with the exact same rejection text the real challenge
+# bot uses, so run_challenge.py's retry-until-active logic gets exercised
+# for real in test mode too, not just simulated. Required -- there's no
+# sensible default, since it's meant to match what you typed into the
+# "Run Challenge Tester" workflow's test_activation_time_utc input.
+TEST_ACTIVATION_TIME_UTC = os.environ["TEST_ACTIVATION_TIME_UTC"]  # HH:MM, UTC
+CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
+
 # Needed only for the /post_join command (posting the "Join Challenge"
 # message to your test channel on your behalf). TEST_CHANNEL_ID is the
 # numeric channel ID (e.g. "-1001234567890"). TEST_ADMIN_USER_ID restricts
@@ -58,6 +68,13 @@ RUN_MINUTES = float(os.environ.get("TEST_BOT_RUN_MINUTES", "10"))
 TEST_CHANNEL_ID = os.environ.get("TEST_CHANNEL_ID")
 TEST_ADMIN_USER_ID = os.environ.get("TEST_ADMIN_USER_ID")
 TEST_BOT_USERNAME = os.environ.get("TEST_BOT_USERNAME", "birrforex_challenge_test_bot")
+
+
+def activation_time_today_utc() -> datetime:
+    """Parses TEST_ACTIVATION_TIME_UTC ('HH:MM') into today's UTC datetime."""
+    hour, minute = (int(p) for p in TEST_ACTIVATION_TIME_UTC.split(":"))
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 # ----------------------------------------------------------------------
 # Random forex question bank -- for testing Gemini's answering ability,
@@ -288,9 +305,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Handles /start <payload> -- this is what a real user's tap on the
     channel's URL button triggers (and what click_button_or_follow_deep_link
     replicates for a URL button in run_challenge.py).
+
+    Rejects with CHALLENGE_NOT_ACTIVE_TEXT before TEST_ACTIVATION_TIME_UTC,
+    mirroring the real challenge bot's own activation gate -- this is what
+    lets run_challenge.py's retry-until-active logic be exercised for real
+    in test mode, not just assumed to work.
     """
     chat_id = update.effective_chat.id
     payload = context.args[0] if context.args else "(none)"
+
+    now = datetime.now(timezone.utc)
+    activation_time = activation_time_today_utc()
+    if now < activation_time:
+        log.info(
+            f"/start received from chat {chat_id} at {now.strftime('%H:%M:%S')} UTC, "
+            f"payload={payload} -- rejecting, not active until {TEST_ACTIVATION_TIME_UTC} UTC"
+        )
+        await update.message.reply_text(f"❌ {CHALLENGE_NOT_ACTIVE_TEXT}")
+        return
+
     log.info(f"/start received from chat {chat_id}, payload={payload}")
 
     questions = random.sample(QUESTION_BANK, TOTAL_QUESTIONS)
