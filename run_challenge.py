@@ -120,12 +120,16 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
 
-def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str) -> str:
+def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str):
     """Look up model_name in GROQ_REASONING_SCHEMES (substring match) and
     return the reasoning_effort value for the given THINKING_LEVEL. Falls
     back to the gpt-oss scheme for unrecognized models, with a log note --
     see GROQ_REASONING_SCHEMES above for why this is a lookup table rather
-    than if/elif branching."""
+    than if/elif branching. Returns None for model families (e.g.
+    groq/compound) that reject the reasoning_effort parameter outright --
+    the call site must then omit it from the API kwargs entirely, since
+    unlike qwen3.6 there is no valid string value that satisfies these
+    models; None here specifically means "don't send this parameter"."""
     # NOTE: this runs at module-load time, before the log() helper is
     # defined further down the file -- use plain print() here, not log().
     model_lower = model_name.lower()
@@ -175,9 +179,15 @@ GROQ_REASONING_SCHEMES = {
         "minimal": "none", "low": "none", "medium": "default", "high": "default",
     },
     "compound": {
-        # I (not claude) added this. this apparently does not support
-        # thinking level too.
-        "minimal": "none", "low": "none", "medium": "default", "high": "default",
+        # groq/compound is an agentic system (tool calls/web search/code
+        # execution under the hood), not a plain chat model -- its API
+        # rejects reasoning_effort outright with a 400 ("reasoning_effort
+        # is not supported with this model"), regardless of value. Unlike
+        # qwen3.6 there's no valid string that satisfies it, so every tier
+        # maps to None, which _resolve_groq_reasoning_effort and the
+        # ask_groq_for_answer call site both treat as "omit the parameter
+        # from the API call entirely" rather than "send this value".
+        "minimal": None, "low": None, "medium": None, "high": None,
     },
 }
 _DEFAULT_GROQ_SCHEME_NAME = "gpt-oss"
@@ -188,7 +198,10 @@ if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
     raise SystemExit(f"THINKING_LEVEL must be one of {_VALID_THINKING_LEVELS}, got {THINKING_LEVEL!r}")
 
 # Groq-specific value derived from THINKING_LEVEL + GROQ_MODEL -- see
-# GROQ_REASONING_SCHEMES and _resolve_groq_reasoning_effort above.
+# GROQ_REASONING_SCHEMES and _resolve_groq_reasoning_effort above. Can be
+# None (e.g. for groq/compound) meaning "omit reasoning_effort entirely" --
+# ask_groq_for_answer's _call_groq() builds its kwargs dict conditionally
+# to handle that, rather than always passing this value straight through.
 GROQ_REASONING_EFFORT = _resolve_groq_reasoning_effort(GROQ_MODEL, THINKING_LEVEL)
 
 # Optional extra sentence appended to every prompt (both Groq and Gemini),
@@ -570,16 +583,23 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     def _call_groq():
         max_attempts = 3
         last_error = None
+        # Some model families (groq/compound) reject reasoning_effort
+        # outright, even set to "none"/"default" -- GROQ_REASONING_EFFORT
+        # is None for those (see GROQ_REASONING_SCHEMES), and the parameter
+        # must be left out of kwargs entirely rather than passed as None,
+        # since the SDK would otherwise still send it.
+        groq_kwargs = {
+            "model": GROQ_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_completion_tokens": 300,
+            "response_format": response_format,
+        }
+        if GROQ_REASONING_EFFORT is not None:
+            groq_kwargs["reasoning_effort"] = GROQ_REASONING_EFFORT
         for attempt in range(1, max_attempts + 1):
             try:
-                return _groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    max_completion_tokens=300,
-                    response_format=response_format,
-                    reasoning_effort=GROQ_REASONING_EFFORT,
-                )
+                return _groq_client.chat.completions.create(**groq_kwargs)
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts:
