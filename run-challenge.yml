@@ -1,0 +1,182 @@
+name: Run Challenge Tester
+
+on:
+  # Manual only. In real mode, trigger any time from 15 minutes before
+  # 17:00 UTC (8:00 PM EAT) onward -- the script waits until then before
+  # messaging the bot, and refuses to start at all if triggered earlier.
+  # In test mode, this single workflow also starts the throwaway test bot
+  # for you in the background -- no need to run "Run Test Bot" separately
+  # anymore. Two activation-time inputs stay separate on purpose (test bot
+  # vs. tester); the tester's field just pre-fills from the bot's field by
+  # default, and you can still override it.
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: "Test mode: run against the throwaway test_bot.py instead of the real bot -- no challenge number needed"
+        type: boolean
+        default: false
+      test_bot_activation_time_eat:
+        description: "Test mode only: activation time for the TEST BOT itself (HH:MM, East Africa Time / UTC+3) -- /start is rejected before this"
+        type: string
+        default: ""
+      test_bot_run_minutes:
+        description: "Test mode only: how many minutes the test bot should stay listening"
+        type: string
+        default: "10"
+      test_activation_time_eat:
+        description: "Test mode only: activation time the TESTER waits for (HH:MM, EAT). Defaults to the same value as the test bot's activation time above -- override only if you deliberately want them different."
+        type: string
+        default: ""
+      challenge_number:
+        description: "Challenge number to run (e.g. 34 -> sends '/start challenge_34' to the bot). Not needed if test_mode is checked."
+        type: string
+        default: ""
+      debug_log_all_events:
+        description: "Log every incoming message (diagnostic mode)"
+        type: boolean
+        default: false
+      gemini_model:
+        description: "Gemini model override (e.g. gemini-3.5-flash-lite). Leave blank to use the script's default."
+        type: string
+        default: ""
+      ai_provider:
+        description: "Which AI answers the quiz: groq (fast) or gemini (fallback)"
+        type: choice
+        options:
+          - groq
+          - gemini
+        default: groq
+      groq_model:
+        description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
+        type: string
+        default: ""
+
+jobs:
+  run-challenge:
+    runs-on: ubuntu-latest
+    # Worst case: triggered 15 min before activation, waits ~15 min, retries
+    # for up to 5 more min after activation, then up to QUIZ_TIMEOUT_MINUTES
+    # (15 by default) to answer the quiz, plus the test bot's own run window
+    # in test mode. Kept well above that; the script's own deadlines stop it
+    # earlier in practice.
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate inputs
+        run: |
+          if [ "${{ github.event.inputs.test_mode }}" != "true" ] && [ -z "${{ github.event.inputs.challenge_number }}" ]; then
+            echo "::error::challenge_number is required unless test_mode is checked."
+            exit 1
+          fi
+          if [ "${{ github.event.inputs.test_mode }}" == "true" ] && [ -z "${{ github.event.inputs.test_bot_activation_time_eat }}" ]; then
+            echo "::error::test_bot_activation_time_eat is required when test_mode is checked."
+            exit 1
+          fi
+
+      - name: Resolve tester activation time (defaults to test bot's time)
+        id: resolve_tester_time
+        run: |
+          bot_time="${{ github.event.inputs.test_bot_activation_time_eat }}"
+          tester_time="${{ github.event.inputs.test_activation_time_eat }}"
+          if [ -z "$tester_time" ]; then
+            tester_time="$bot_time"
+            echo "test_activation_time_eat left blank -- defaulting to test bot's activation time ($bot_time EAT)"
+          else
+            echo "Using explicitly-provided tester activation time ($tester_time EAT), overriding the test bot's ($bot_time EAT)"
+          fi
+          echo "tester_time_eat=$tester_time" >> "$GITHUB_OUTPUT"
+
+      - name: Convert activation times from EAT to UTC
+        id: convert_time
+        run: |
+          # EAT is a fixed UTC+3 year-round (no DST), so a flat 3-hour
+          # subtraction is always correct -- no timezone database needed.
+          bot_eat="${{ github.event.inputs.test_bot_activation_time_eat }}"
+          if [ -n "$bot_eat" ]; then
+            bot_utc=$(python3 -c "h,m=map(int,'$bot_eat'.split(':')); t=(h*60+m-180)%1440; print(f'{t//60:02d}:{t%60:02d}')")
+            echo "Converted test bot activation time $bot_eat EAT -> $bot_utc UTC"
+          else
+            bot_utc=""
+          fi
+          echo "bot_utc_time=$bot_utc" >> "$GITHUB_OUTPUT"
+
+          tester_eat="${{ steps.resolve_tester_time.outputs.tester_time_eat }}"
+          if [ -n "$tester_eat" ]; then
+            tester_utc=$(python3 -c "h,m=map(int,'$tester_eat'.split(':')); t=(h*60+m-180)%1440; print(f'{t//60:02d}:{t%60:02d}')")
+            echo "Converted tester activation time $tester_eat EAT -> $tester_utc UTC"
+          else
+            tester_utc=""
+          fi
+          echo "tester_utc_time=$tester_utc" >> "$GITHUB_OUTPUT"
+
+      - name: Start test bot in background (test mode only)
+        if: ${{ github.event.inputs.test_mode == 'true' }}
+        env:
+          TEST_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
+          TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.test_bot_run_minutes || '10' }}
+          TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.bot_utc_time }}
+          TEST_CHANNEL_ID: ${{ secrets.TEST_CHANNEL_ID }}
+          TEST_ADMIN_USER_ID: ${{ secrets.TEST_ADMIN_USER_ID }}
+        run: |
+          # Runs for the whole rest of this job in the background so the
+          # tester step below can talk to it, exactly like the old separate
+          # "Run Test Bot" workflow did -- just launched from this same job
+          # instead of a second manual trigger. Logs go to test_bot.log so
+          # they don't interleave unreadably with the tester's own output;
+          # the log is printed at the end of the job either way.
+          nohup python test_bot.py > test_bot.log 2>&1 &
+          echo "Started test_bot.py in the background (PID $!)"
+          # Give it a moment to come up before the tester starts messaging it.
+          sleep 3
+
+      - name: Run challenge flow
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
+          TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
+          TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.tester_utc_time }}
+          TEST_BOT_USERNAME: ${{ secrets.TEST_BOT_USERNAME }}
+          CHALLENGE_BOT_USERNAME: ${{ secrets.CHALLENGE_BOT_USERNAME }}
+          CHALLENGE_NUMBER: ${{ github.event.inputs.challenge_number }}
+          TOTAL_QUESTIONS: "5"
+          MIN_SECONDS_SINCE_START_QUIZ: "15"
+          DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
+        run: |
+          if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
+            export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"
+            echo "Using GEMINI_MODEL override: $GEMINI_MODEL"
+          else
+            echo "No gemini_model input given -- using the script's built-in default"
+          fi
+          if [ -n "${{ github.event.inputs.groq_model }}" ]; then
+            export GROQ_MODEL="${{ github.event.inputs.groq_model }}"
+            echo "Using GROQ_MODEL override: $GROQ_MODEL"
+          else
+            echo "No groq_model input given -- using the script's built-in default"
+          fi
+          python run_challenge.py
+
+      - name: Show test bot log (test mode only)
+        if: ${{ always() && github.event.inputs.test_mode == 'true' }}
+        run: |
+          if [ -f test_bot.log ]; then
+            echo "----- test_bot.py output -----"
+            cat test_bot.log
+          else
+            echo "No test_bot.log found (test bot may not have started)."
+          fi
