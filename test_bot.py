@@ -200,10 +200,190 @@ QUESTION_BANK = [
         "correct": 0,
         "bare_letters": True,
     },
+
+    # ------------------------------------------------------------------
+    # Real questions captured from the LIVE challenge bot (screenshots,
+    # 2026-09-04) -- these are noticeably harder than the hand-written
+    # ones above and are here so testing exercises the actual difficulty
+    # level the AI will face for real, not just an easier approximation.
+    # ------------------------------------------------------------------
+
+    # -- Real quiz set 1/3 --
+    {
+        "text": (
+            "Which of the following is NOT true about Dealing Desk (DD) brokers?\n"
+            "A) There is no potential conflict of interest between the broker and the client\n"
+            "B) A major source of revenue can be the spread\n"
+            "C) They can act as the liquidity provider for their clients\n"
+            "D) They can offer relatively tight and fixed spreads"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+    {
+        "text": "Which type of broker routes client orders to preselected liquidity providers?",
+        "options": ["STP", "ECN", "Dealing Desk", "Hybrid"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which of the following is TRUE about Forex brokers?\n"
+            "A) ECN brokers route client orders directly to the global Forex market\n"
+            "B) STP brokers have no spread and only earn through commissions\n"
+            "C) STP brokers usually add a markup to the spread received from liquidity providers\n"
+            "D) Dealing Desk brokers do not provide their own quotes"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+    {
+        "text": (
+            "Which of the following is FALSE about the Forex market and broker execution?\n"
+            "A) There is no single centralized global Forex exchange\n"
+            "B) One broker can use another broker or dealer as a liquidity provider\n"
+            "C) An ECN broker routes orders through its ECN/liquidity network rather than to one global Forex exchange\n"
+            "D) A Non-Dealing Desk broker can act as the liquidity provider for the same client order"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+    },
+    {
+        "text": "What is a Liquidity Provider?",
+        "options": [
+            "A firm that provides prices and facilitates trade execution",
+            "A company that manages traders' accounts",
+            "A firm that connects traders with brokers",
+            "A company that regulates financial markets",
+        ],
+        "correct": 0,
+        "bare_letters": False,
+    },
+
+    # -- Real quiz set 2/3 --
+    {
+        "text": "When we execute a Buy order which price are we using",
+        "options": ["Spread", "Average of ASK and BID", "BID", "ASK"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "which one we consider as pip in XAUUSD (GOLD) Pair Commonly\n"
+            "A) The 4th decimal place\n"
+            "B) The 1st decimal place\n"
+            "C) The 2nd decimal place\n"
+            "D) The 1st digit before the decimal point"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+    {
+        "text": "what is the smallest price level a currency pair can increase or decrease in modern market",
+        "options": ["price fraction", "Pip", "Tick", "Point"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+
+    # -- Real quiz set 3/3 --
+    {
+        "text": (
+            "Which of the following is a leading global futures marketplace, known for "
+            "benchmark futures contracts across major asset classes?\n"
+            "A) Intercontinental Exchange (ICE)\n"
+            "B) Eurex\n"
+            "C) Chicago Mercantile Exchange (CME)\n"
+            "D) New York Stock Exchange (NYSE)"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+    {
+        "text": (
+            "Which of the following is NOT true about CFDs?\n"
+            "A) The trader does not own the underlying asset\n"
+            "B) CFDs are traded on centralized exchanges\n"
+            "C) You go long if you expect the asset price to rise\n"
+            "D) CFDs can provide flexible and accessible exposure to different markets"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": (
+            "Which of the following is NOT true about Futures and CFDs?\n"
+            "A) CFDs have a centralized order book\n"
+            "B) Futures can be traded without owning the underlying asset, to profit from price movements\n"
+            "C) Futures have a centralized order book\n"
+            "D) CFDs are traded OTC"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+    {
+        "text": (
+            "Which of the following is TRUE about futures trading?\n"
+            "A) Futures are traded OTC\n"
+            "B) Futures trading does not involve leverage\n"
+            "C) You can trade futures based on price movements without owning the asset\n"
+            "D) Futures trading has no margin requirement"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+    {
+        "text": "What do we call selling an asset you do not currently own, with the aim of benefiting if its price falls?",
+        "options": ["Going Short", "Hedging", "Selling on Margin", "Going Long"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+]
+
+# ----------------------------------------------------------------------
+# Video-reference questions -- captured from the live bot alongside the
+# ones above, but these explicitly point at "the Section Video" for the
+# answer (e.g. "in the USDJPY Example given in the Section Video, what
+# is the Spread"). The AI answering the quiz has no access to that video,
+# so these are UNANSWERABLE from the question text alone -- deliberately
+# kept OUT of the normal random QUESTION_BANK draw (they'd just be
+# unfairly-unanswerable noise most of the time) and instead only appear
+# when explicitly requested, so you can specifically test how the AI
+# provider behaves when it hits a question it fundamentally can't answer
+# (e.g. does it pick something plausible, refuse, time out, etc.)
+# See TEST_INCLUDE_VIDEO_QUESTIONS env var / workflow input.
+# ----------------------------------------------------------------------
+VIDEO_REFERENCE_QUESTION_BANK = [
+    {
+        "text": "in the USDJPY Example given in the Section Video What is the Spread",
+        "options": ["11 pip", "11 point", "12 point", "12 pip"],
+        "correct": 0,  # per the real quiz's answer key; unverifiable without the video
+        "bare_letters": False,
+    },
+    {
+        "text": "In the section Video what pair is given as second example on Minor Pairs",
+        "options": ["USD CAD", "EUR JPY", "EUR GBP", "GBP JPY"],
+        "correct": 1,  # per the real quiz's answer key; unverifiable without the video
+        "bare_letters": False,
+    },
 ]
 
 TOTAL_QUESTIONS = 5
 LETTERS = ["A", "B", "C", "D", "E", "F"]
+
+# Set TEST_INCLUDE_VIDEO_QUESTIONS=true to guarantee both
+# VIDEO_REFERENCE_QUESTION_BANK questions are included among the 5 for
+# every session this run -- lets you deliberately test the
+# unanswerable-question scenario on demand instead of waiting for a rare
+# random draw. Off by default so ordinary test runs behave as before.
+INCLUDE_VIDEO_QUESTIONS = os.environ.get("TEST_INCLUDE_VIDEO_QUESTIONS", "false").lower() == "true"
 
 # Per-chat quiz state: chat_id -> {
 #   "questions": [...], "index": int,
@@ -326,7 +506,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     log.info(f"/start received from chat {chat_id}, payload={payload}")
 
-    questions = random.sample(QUESTION_BANK, TOTAL_QUESTIONS)
+    if INCLUDE_VIDEO_QUESTIONS:
+        # Guarantee both video-reference questions appear, then fill the
+        # rest randomly from the normal bank so the session is still 5
+        # questions total and still varies run to run.
+        remaining_slots = TOTAL_QUESTIONS - len(VIDEO_REFERENCE_QUESTION_BANK)
+        questions = list(VIDEO_REFERENCE_QUESTION_BANK) + random.sample(QUESTION_BANK, remaining_slots)
+        random.shuffle(questions)
+        log.info("TEST_INCLUDE_VIDEO_QUESTIONS is set -- both video-reference questions included this session")
+    else:
+        questions = random.sample(QUESTION_BANK, TOTAL_QUESTIONS)
     _sessions[chat_id] = {
         "questions": questions,
         "index": 0,
