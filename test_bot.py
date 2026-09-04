@@ -101,114 +101,15 @@ def activation_time_today_utc() -> datetime:
 # ----------------------------------------------------------------------
 
 QUESTION_BANK = [
-    # -- Style A: full option text on each button --
-    {
-        "text": "What does 'pip' stand for in forex trading?",
-        "options": ["Percentage in Point", "Price in Points", "Profit in Position", "Point in Percentage"],
-        "correct": 0,
-        "bare_letters": False,
-    },
-    {
-        "text": "Which currency pair is known as 'Cable'?",
-        "options": ["EUR/USD", "USD/JPY", "GBP/USD", "USD/CHF"],
-        "correct": 2,
-        "bare_letters": False,
-    },
-    {
-        "text": "A 'bullish' market means prices are generally:",
-        "options": ["Falling", "Rising", "Flat", "Volatile with no trend"],
-        "correct": 1,
-        "bare_letters": False,
-    },
-    {
-        "text": "Which of these is a 'safe haven' currency?",
-        "options": ["Australian Dollar", "South African Rand", "Swiss Franc", "Turkish Lira"],
-        "correct": 2,
-        "bare_letters": False,
-    },
-    {
-        "text": "What is 'leverage' in forex trading?",
-        "options": [
-            "A type of chart pattern",
-            "Borrowed capital to increase position size",
-            "The spread between bid and ask",
-            "A central bank interest rate tool",
-        ],
-        "correct": 1,
-        "bare_letters": False,
-    },
-    # -- Style B: options listed IN the question text, bare-letter buttons
-    # (A/B/C/D only) -- matches your real bot's Question 2-4 style --
-    {
-        "text": (
-            "Which of the following is NOT true about CFDs?\n"
-            "A) They let you speculate on price without owning the asset\n"
-            "B) They are only available for stock indices\n"
-            "C) They can be traded on margin\n"
-            "D) Profit or loss is based on the price difference"
-        ),
-        "options": ["A", "B", "C", "D"],
-        "correct": 1,
-        "bare_letters": True,
-    },
-    {
-        "text": (
-            "Which of the following is NOT true about Futures contracts?\n"
-            "A) They have a standardized contract size\n"
-            "B) They are traded over-the-counter with no exchange\n"
-            "C) They have a fixed expiration date\n"
-            "D) They are used for hedging and speculation"
-        ),
-        "options": ["A", "B", "C", "D"],
-        "correct": 1,
-        "bare_letters": True,
-    },
-    {
-        "text": (
-            "Which of the following is TRUE about futures contracts?\n"
-            "A) They are traded on a regulated exchange\n"
-            "B) They never have an expiration date\n"
-            "C) They cannot be used for hedging\n"
-            "D) They are identical to spot contracts"
-        ),
-        "options": ["A", "B", "C", "D"],
-        "correct": 0,
-        "bare_letters": True,
-    },
-    {
-        "text": (
-            "Which of the following is a leading global forex broker regulator?\n"
-            "A) FIFA\n"
-            "B) FCA (Financial Conduct Authority)\n"
-            "C) WHO\n"
-            "D) IATA"
-        ),
-        "options": ["A", "B", "C", "D"],
-        "correct": 1,
-        "bare_letters": True,
-    },
-    {
-        "text": (
-            "What do we call selling an asset you do not currently own, "
-            "expecting to buy it back later at a lower price?\n"
-            "A) Going Short\n"
-            "B) Hedging\n"
-            "C) Selling on Margin\n"
-            "D) Going Long"
-        ),
-        "options": ["A", "B", "C", "D"],
-        "correct": 0,
-        "bare_letters": True,
-    },
-
     # ------------------------------------------------------------------
     # Real questions captured from the LIVE challenge bot (screenshots,
-    # 2026-09-04) -- these are noticeably harder than the hand-written
-    # ones above and are here so testing exercises the actual difficulty
-    # level the AI will face for real, not just an easier approximation.
+    # 2026-09-04), cross-checked against the user's official answer key
+    # (also 2026-09-04). Hand-written placeholder questions have been
+    # removed -- this bank is now 100% real captured questions, matching
+    # actual live difficulty rather than an approximation of it.
     # ------------------------------------------------------------------
 
-    # -- Real quiz set 1/3 --
+    # -- Section 4: Understanding Forex Brokers and Their Types --
     {
         "text": (
             "Which of the following is NOT true about Dealing Desk (DD) brokers?\n"
@@ -263,11 +164,19 @@ QUESTION_BANK = [
         "bare_letters": False,
     },
 
-    # -- Real quiz set 2/3 --
+    # -- Section 5: Understanding Currency Pairs (Trading Instruments) --
+    # (the 2 video-referencing questions from this section live in
+    # VIDEO_REFERENCE_QUESTION_BANK below, not here)
     {
         "text": "When we execute a Buy order which price are we using",
         "options": ["Spread", "Average of ASK and BID", "BID", "ASK"],
         "correct": 3,
+        "bare_letters": False,
+    },
+    {
+        "text": "what is the smallest price level a currency pair can increase or decrease in modern market",
+        "options": ["price fraction", "Pip", "Tick", "Point"],
+        "correct": 3,  # "Point" -- corrected against official answer key (was wrongly "Pip")
         "bare_letters": False,
     },
     {
@@ -279,17 +188,11 @@ QUESTION_BANK = [
             "D) The 1st digit before the decimal point"
         ),
         "options": ["A", "B", "C", "D"],
-        "correct": 0,
+        "correct": 1,  # "The 1st decimal place" -- corrected against official answer key (was wrongly A)
         "bare_letters": True,
     },
-    {
-        "text": "what is the smallest price level a currency pair can increase or decrease in modern market",
-        "options": ["price fraction", "Pip", "Tick", "Point"],
-        "correct": 1,
-        "bare_letters": False,
-    },
 
-    # -- Real quiz set 3/3 --
+    # -- Section 2: CFD (Contract for Difference) --
     {
         "text": (
             "Which of the following is a leading global futures marketplace, known for "
@@ -348,29 +251,30 @@ QUESTION_BANK = [
 ]
 
 # ----------------------------------------------------------------------
-# Video-reference questions -- captured from the live bot alongside the
-# ones above, but these explicitly point at "the Section Video" for the
-# answer (e.g. "in the USDJPY Example given in the Section Video, what
-# is the Spread"). The AI answering the quiz has no access to that video,
-# so these are UNANSWERABLE from the question text alone -- deliberately
-# kept OUT of the normal random QUESTION_BANK draw (they'd just be
-# unfairly-unanswerable noise most of the time) and instead only appear
-# when explicitly requested, so you can specifically test how the AI
-# provider behaves when it hits a question it fundamentally can't answer
-# (e.g. does it pick something plausible, refuse, time out, etc.)
+# Video-reference questions -- from Section 5, explicitly point at "the
+# Section Video" for the answer (e.g. "in the USDJPY Example given in
+# the Section Video, what is the Spread"). The AI answering the quiz has
+# no access to that video, so these are UNANSWERABLE from the question
+# text alone -- kept OUT of the normal random QUESTION_BANK draw (they'd
+# just be unfairly-unanswerable noise most of the time) and instead only
+# appear when explicitly requested, so you can specifically test how the
+# AI provider behaves when it hits a question it fundamentally can't
+# answer (e.g. does it pick something plausible, refuse, time out, etc).
+# Correct answers below are the user's official answer key -- used for
+# scoring only, NOT given to the AI, which still has to guess blind.
 # See TEST_INCLUDE_VIDEO_QUESTIONS env var / workflow input.
 # ----------------------------------------------------------------------
 VIDEO_REFERENCE_QUESTION_BANK = [
     {
         "text": "in the USDJPY Example given in the Section Video What is the Spread",
         "options": ["11 pip", "11 point", "12 point", "12 pip"],
-        "correct": 0,  # per the real quiz's answer key; unverifiable without the video
+        "correct": 1,  # "11 point" -- corrected against official answer key (was wrongly "11 pip")
         "bare_letters": False,
     },
     {
         "text": "In the section Video what pair is given as second example on Minor Pairs",
         "options": ["USD CAD", "EUR JPY", "EUR GBP", "GBP JPY"],
-        "correct": 1,  # per the real quiz's answer key; unverifiable without the video
+        "correct": 3,  # "GBP JPY" -- corrected against official answer key (was wrongly "EUR JPY")
         "bare_letters": False,
     },
 ]

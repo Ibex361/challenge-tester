@@ -321,6 +321,36 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
     )
 
 
+def _log_groq_usage(resp, attempt_label: str) -> None:
+    """
+    Logs actual token usage from a Groq response -- prompt/completion/total,
+    plus a reasoning-token breakdown when Groq's API actually returns one
+    (as of this writing that field is inconsistently populated for
+    reasoning models like gpt-oss-20b, sometimes 0 even when real reasoning
+    happened -- see https://community.groq.com/t/gpt-oss-120b-reasoning-tokens-not-counted-in-responses-api-usage-statistics/555,
+    so this only reports it when present rather than assuming it's
+    accurate). This is purely observational -- doesn't affect answering
+    logic -- added to see real-world token spend per question, e.g. when
+    sizing max_completion_tokens or estimating the cost of adding extra
+    context (like a video transcript) to the prompt.
+    """
+    usage = getattr(resp, "usage", None)
+    if usage is None:
+        return
+    prompt_toks = getattr(usage, "prompt_tokens", None)
+    completion_toks = getattr(usage, "completion_tokens", None)
+    total_toks = getattr(usage, "total_tokens", None)
+    reasoning_toks = None
+    details = getattr(usage, "completion_tokens_details", None)
+    if details is not None:
+        reasoning_toks = getattr(details, "reasoning_tokens", None)
+
+    parts = [f"prompt={prompt_toks}", f"completion={completion_toks}", f"total={total_toks}"]
+    if reasoning_toks is not None:
+        parts.append(f"reasoning={reasoning_toks}")
+    log(f"Groq answer ({attempt_label})", "INFO", f"token usage -- {', '.join(parts)}")
+
+
 def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
     """
     Groq equivalent of ask_gemini_for_answer(). Same shape, same return
@@ -387,6 +417,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
 
     def _try_once():
         resp = _call_groq()
+        _log_groq_usage(resp, attempt_label)
         raw = (resp.choices[0].message.content or "").strip()
         try:
             import json as _json
