@@ -59,10 +59,11 @@ on:
         description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
         type: string
         default: ""
-      groq_reasoning_effort:
-        description: "Groq reasoning effort: low (fastest, default), medium (Groq's own default, thinks more), or high"
+      thinking_level:
+        description: "Reasoning effort for whichever AI provider is active (groq or gemini). minimal (fastest, off for Gemini/mapped to low for Groq since Groq has no minimal), low (default), medium, or high."
         type: choice
         options:
+          - minimal
           - low
           - medium
           - high
@@ -219,7 +220,7 @@ jobs:
           TOTAL_QUESTIONS: "5"
           MIN_SECONDS_SINCE_START_QUIZ: "15"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
-          GROQ_REASONING_EFFORT: ${{ github.event.inputs.groq_reasoning_effort || 'low' }}
+          THINKING_LEVEL: ${{ github.event.inputs.thinking_level || 'low' }}
           PROMPT_EXTRA_INSTRUCTION: ${{ github.event.inputs.prompt_extra_instruction }}
           SECTION_NOTES: ${{ github.event.inputs.section_notes }}
         run: |

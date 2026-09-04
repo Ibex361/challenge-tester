@@ -119,12 +119,24 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # developer tiers in August 2026; this is its recommended replacement.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
-# Tunable independently of code changes -- set to "low" (default, fastest),
-# "medium" (Groq's own default for this model, thinks more before
-# answering), or "high". Set via workflow input / env var so you can A/B
-# test speed vs. correctness across runs without editing this file.
-# Reading os.environ once at startup costs nothing at runtime either way.
-GROQ_REASONING_EFFORT = os.environ.get("GROQ_REASONING_EFFORT", "low")
+# Unified thinking/reasoning-effort control for BOTH providers, so you can
+# A/B test speed vs. correctness with one input regardless of which
+# provider is active. Accepts "minimal", "low" (default, fastest),
+# "medium", or "high".
+#   - Gemini 3 (gemini-3.5-flash-lite) natively supports all four values
+#     via thinking_level -- passed straight through, see ask_gemini_for_answer.
+#   - Groq's API only accepts "low"/"medium"/"high" for this model (it
+#     rejects both "none" and "minimal" with a 400, despite "none" being
+#     listed in some SDK type hints) -- so "minimal" is mapped down to
+#     "low" for Groq specifically, since that's the closest valid value.
+#     See ask_groq_for_answer.
+THINKING_LEVEL = os.environ.get("THINKING_LEVEL", "low").strip().lower()
+_VALID_THINKING_LEVELS = ("minimal", "low", "medium", "high")
+if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
+    raise SystemExit(f"THINKING_LEVEL must be one of {_VALID_THINKING_LEVELS}, got {THINKING_LEVEL!r}")
+
+# Groq-specific value derived from THINKING_LEVEL -- see note above.
+GROQ_REASONING_EFFORT = "low" if THINKING_LEVEL == "minimal" else THINKING_LEVEL
 
 # Optional extra sentence appended to every prompt (both Groq and Gemini),
 # meant to nudge the model to read qualifying words/phrasing more carefully
@@ -307,16 +319,18 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
     """
     valid_letters = _LETTERS[: len(options)]
 
-    # thinking_level="minimal" turns off Gemini 3's internal reasoning pass
-    # for this call. max_output_tokens is capped hard since the schema-
-    # constrained response is always a single letter -- this doesn't change
-    # correctness, but it removes any chance of the model padding output
-    # (e.g. restating the option text) and paying for tokens we discard.
+    # thinking_level is tunable via THINKING_LEVEL (default "minimal" was
+    # previously hardcoded here; now shared with Groq's reasoning_effort --
+    # see THINKING_LEVEL above). max_output_tokens is capped hard since the
+    # schema-constrained response is always a single letter -- this doesn't
+    # change correctness, but it removes any chance of the model padding
+    # output (e.g. restating the option text) and paying for tokens we
+    # discard.
     generation_config = genai_types.GenerateContentConfig(
         temperature=0,
         response_mime_type="text/x.enum",
         response_schema={"type": "STRING", "enum": valid_letters},
-        thinking_config=genai_types.ThinkingConfig(thinking_level="minimal"),
+        thinking_config=genai_types.ThinkingConfig(thinking_level=THINKING_LEVEL),
         max_output_tokens=8,
         # No tools/functions are declared for this call -- explicitly turning
         # off automatic function calling avoids the SDK's unnecessary AFC
@@ -427,9 +441,9 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     # JSON Schema mode with strict=True forces the model to return exactly
     # {"answer": "<one of the valid letters>"} -- no free text, no
     # explanation, nothing to parse out with a regex. reasoning_effort is
-    # tunable via GROQ_REASONING_EFFORT (default "low", the lowest level
-    # Groq's live API accepts for this model -- "none" is listed in some
-    # SDK type hints but the live API rejects it with a 400).
+    # tunable via the shared THINKING_LEVEL env var (see above; "minimal"
+    # maps to "low" for Groq, since Groq's live API rejects both "none" and
+    # "minimal" with a 400 despite "none" appearing in some SDK type hints).
     # Important: gpt-oss-20b ALWAYS spends some tokens reasoning before the
     # JSON answer, even at "low" -- those reasoning tokens count against
     # max_completion_tokens. A too-low budget (e.g. 20) gets cut off mid-
