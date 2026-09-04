@@ -27,10 +27,15 @@ on:
         description: "Test mode only: activation time the TESTER waits for (HH:MM, EAT). Defaults to the same value as the test bot's activation time above -- override only if you deliberately want them different."
         type: string
         default: ""
-      test_include_video_questions:
-        description: "Test mode only: guarantee the 2 'refers to a video' questions (unanswerable from text alone) are included in this session, to test how the AI handles them"
-        type: boolean
-        default: false
+      test_quiz_selection:
+        description: "Test mode only: which fixed quiz session to run. quiz2 includes the 2 video-reference questions (unanswerable from text alone). random picks one of the 3 each run."
+        type: choice
+        options:
+          - random
+          - quiz1
+          - quiz2
+          - quiz3
+        default: random
       challenge_number:
         description: "Challenge number to run (e.g. 34 -> sends '/start challenge_34' to the bot). Not needed if test_mode is checked."
         type: string
@@ -152,7 +157,7 @@ jobs:
           TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.bot_utc_time }}
           TEST_CHANNEL_ID: ${{ secrets.TEST_CHANNEL_ID }}
           TEST_ADMIN_USER_ID: ${{ secrets.TEST_ADMIN_USER_ID }}
-          TEST_INCLUDE_VIDEO_QUESTIONS: ${{ github.event.inputs.test_include_video_questions || 'false' }}
+          TEST_QUIZ_SELECTION: ${{ github.event.inputs.test_quiz_selection || 'random' }}
         run: |
           # Runs for the whole rest of this job in the background so the
           # tester step below can talk to it, exactly like the old separate

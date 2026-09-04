@@ -77,17 +77,14 @@ def activation_time_today_utc() -> datetime:
     return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 # ----------------------------------------------------------------------
-# Random forex question bank -- for testing Gemini's answering ability,
-# not real challenge content. Each question has exactly one correct
-# option; a fresh set of 5 is picked at random per test session so
-# answers aren't memorized/stale across runs.
-# ----------------------------------------------------------------------
-
-# ----------------------------------------------------------------------
-# Random forex question bank -- for testing Gemini's answering ability,
-# not real challenge content. Each question has exactly one correct
-# option; a fresh set of 5 is picked at random per test session so
-# answers aren't memorized/stale across runs.
+# Real questions captured from the LIVE challenge bot (screenshots,
+# 2026-09-04), cross-checked against the user's official answer key
+# (also 2026-09-04). Fixed into 3 quiz sessions -- one per real quiz you
+# screenshotted -- instead of one shuffled pool, so each session's 5
+# questions always appear together as a set (order within a quiz doesn't
+# matter, confirmed with user). Pick which quiz to run via
+# TEST_QUIZ_SELECTION (env var / workflow dropdown: "quiz1"/"quiz2"/"quiz3",
+# or "random" to pick one of the 3 at random each session).
 #
 # IMPORTANT: your real bot mixes two button styles across questions --
 # some show the full option text on the button (e.g. "A) Going Short"),
@@ -100,15 +97,7 @@ def activation_time_today_utc() -> datetime:
 # difficulty rather than test an easier version of the flow.
 # ----------------------------------------------------------------------
 
-QUESTION_BANK = [
-    # ------------------------------------------------------------------
-    # Real questions captured from the LIVE challenge bot (screenshots,
-    # 2026-09-04), cross-checked against the user's official answer key
-    # (also 2026-09-04). Hand-written placeholder questions have been
-    # removed -- this bank is now 100% real captured questions, matching
-    # actual live difficulty rather than an approximation of it.
-    # ------------------------------------------------------------------
-
+QUIZ_1_FOREX_BROKERS = [
     # -- Section 4: Understanding Forex Brokers and Their Types --
     {
         "text": (
@@ -163,10 +152,16 @@ QUESTION_BANK = [
         "correct": 0,
         "bare_letters": False,
     },
+]
 
-    # -- Section 5: Understanding Currency Pairs (Trading Instruments) --
-    # (the 2 video-referencing questions from this section live in
-    # VIDEO_REFERENCE_QUESTION_BANK below, not here)
+# -- Section 5: Understanding Currency Pairs (Trading Instruments) --
+# Includes the 2 video-referencing questions ("in the Section Video...") --
+# the AI has no access to that video, so these are UNANSWERABLE from the
+# question text alone. Correct answers below are the user's official
+# answer key -- used for scoring only, NOT given to the AI, which still
+# has to guess blind. Kept in this quiz's fixed set (not toggled
+# separately) since they're genuinely part of this real quiz session.
+QUIZ_2_CURRENCY_PAIRS = [
     {
         "text": "When we execute a Buy order which price are we using",
         "options": ["Spread", "Average of ASK and BID", "BID", "ASK"],
@@ -191,8 +186,22 @@ QUESTION_BANK = [
         "correct": 1,  # "The 1st decimal place" -- corrected against official answer key (was wrongly A)
         "bare_letters": True,
     },
+    {
+        "text": "in the USDJPY Example given in the Section Video What is the Spread",
+        "options": ["11 pip", "11 point", "12 point", "12 pip"],
+        "correct": 1,  # "11 point" -- corrected against official answer key (was wrongly "11 pip")
+        "bare_letters": False,
+    },
+    {
+        "text": "In the section Video what pair is given as second example on Minor Pairs",
+        "options": ["USD CAD", "EUR JPY", "EUR GBP", "GBP JPY"],
+        "correct": 3,  # "GBP JPY" -- corrected against official answer key (was wrongly "EUR JPY")
+        "bare_letters": False,
+    },
+]
 
-    # -- Section 2: CFD (Contract for Difference) --
+# -- Section 2: CFD (Contract for Difference) --
+QUIZ_3_CFD = [
     {
         "text": (
             "Which of the following is a leading global futures marketplace, known for "
@@ -250,44 +259,24 @@ QUESTION_BANK = [
     },
 ]
 
-# ----------------------------------------------------------------------
-# Video-reference questions -- from Section 5, explicitly point at "the
-# Section Video" for the answer (e.g. "in the USDJPY Example given in
-# the Section Video, what is the Spread"). The AI answering the quiz has
-# no access to that video, so these are UNANSWERABLE from the question
-# text alone -- kept OUT of the normal random QUESTION_BANK draw (they'd
-# just be unfairly-unanswerable noise most of the time) and instead only
-# appear when explicitly requested, so you can specifically test how the
-# AI provider behaves when it hits a question it fundamentally can't
-# answer (e.g. does it pick something plausible, refuse, time out, etc).
-# Correct answers below are the user's official answer key -- used for
-# scoring only, NOT given to the AI, which still has to guess blind.
-# See TEST_INCLUDE_VIDEO_QUESTIONS env var / workflow input.
-# ----------------------------------------------------------------------
-VIDEO_REFERENCE_QUESTION_BANK = [
-    {
-        "text": "in the USDJPY Example given in the Section Video What is the Spread",
-        "options": ["11 pip", "11 point", "12 point", "12 pip"],
-        "correct": 1,  # "11 point" -- corrected against official answer key (was wrongly "11 pip")
-        "bare_letters": False,
-    },
-    {
-        "text": "In the section Video what pair is given as second example on Minor Pairs",
-        "options": ["USD CAD", "EUR JPY", "EUR GBP", "GBP JPY"],
-        "correct": 3,  # "GBP JPY" -- corrected against official answer key (was wrongly "EUR JPY")
-        "bare_letters": False,
-    },
-]
+# Each quiz stays together as its own fixed 5-question set, matching how
+# they were really presented -- not shuffled or mixed with the others.
+QUIZ_SESSIONS = {
+    "quiz1": QUIZ_1_FOREX_BROKERS,
+    "quiz2": QUIZ_2_CURRENCY_PAIRS,
+    "quiz3": QUIZ_3_CFD,
+}
 
 TOTAL_QUESTIONS = 5
 LETTERS = ["A", "B", "C", "D", "E", "F"]
 
-# Set TEST_INCLUDE_VIDEO_QUESTIONS=true to guarantee both
-# VIDEO_REFERENCE_QUESTION_BANK questions are included among the 5 for
-# every session this run -- lets you deliberately test the
-# unanswerable-question scenario on demand instead of waiting for a rare
-# random draw. Off by default so ordinary test runs behave as before.
-INCLUDE_VIDEO_QUESTIONS = os.environ.get("TEST_INCLUDE_VIDEO_QUESTIONS", "false").lower() == "true"
+# Which quiz session to run: "quiz1", "quiz2", "quiz3", or "random" to
+# pick one of the 3 at random each session. Replaces the old
+# TEST_INCLUDE_VIDEO_QUESTIONS boolean -- selecting quiz2 naturally
+# includes its 2 video-reference questions since they're part of that
+# real quiz, no separate toggle needed. Defaults to "random" so ordinary
+# test runs still vary session to session like before.
+TEST_QUIZ_SELECTION = os.environ.get("TEST_QUIZ_SELECTION", "random").lower()
 
 # Per-chat quiz state: chat_id -> {
 #   "questions": [...], "index": int,
@@ -410,16 +399,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     log.info(f"/start received from chat {chat_id}, payload={payload}")
 
-    if INCLUDE_VIDEO_QUESTIONS:
-        # Guarantee both video-reference questions appear, then fill the
-        # rest randomly from the normal bank so the session is still 5
-        # questions total and still varies run to run.
-        remaining_slots = TOTAL_QUESTIONS - len(VIDEO_REFERENCE_QUESTION_BANK)
-        questions = list(VIDEO_REFERENCE_QUESTION_BANK) + random.sample(QUESTION_BANK, remaining_slots)
-        random.shuffle(questions)
-        log.info("TEST_INCLUDE_VIDEO_QUESTIONS is set -- both video-reference questions included this session")
+    if TEST_QUIZ_SELECTION == "random":
+        quiz_key = random.choice(list(QUIZ_SESSIONS.keys()))
+    elif TEST_QUIZ_SELECTION in QUIZ_SESSIONS:
+        quiz_key = TEST_QUIZ_SELECTION
     else:
-        questions = random.sample(QUESTION_BANK, TOTAL_QUESTIONS)
+        log.warning(
+            f"TEST_QUIZ_SELECTION={TEST_QUIZ_SELECTION!r} not recognized "
+            f"(expected one of {list(QUIZ_SESSIONS.keys())} or 'random') -- "
+            "falling back to a random quiz"
+        )
+        quiz_key = random.choice(list(QUIZ_SESSIONS.keys()))
+
+    # Fixed set, in the order defined above -- order within a quiz doesn't
+    # matter (confirmed with user), so no shuffling of the 5 questions.
+    questions = list(QUIZ_SESSIONS[quiz_key])
+    log.info(f"Quiz session selected: {quiz_key}")
+
     _sessions[chat_id] = {
         "questions": questions,
         "index": 0,
