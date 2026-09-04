@@ -312,6 +312,38 @@ def _build_prompt(question_text: str, options: list[str]) -> str:
     )
 
 
+def _log_gemini_usage(resp, attempt_label: str) -> None:
+    """
+    Gemini equivalent of _log_groq_usage -- logs prompt/thoughts/candidates/
+    total token counts from usage_metadata when present. Purely
+    observational, same reasoning as the Groq version: helps size
+    max_output_tokens correctly per model/thinking_level combo instead of
+    guessing (see the MAX_TOKENS/empty-response issue this was added
+    alongside, 2026-09-05).
+    """
+    usage = getattr(resp, "usage_metadata", None)
+    if usage is None:
+        return
+    prompt_toks = getattr(usage, "prompt_token_count", None)
+    thoughts_toks = getattr(usage, "thoughts_token_count", None)
+    candidates_toks = getattr(usage, "candidates_token_count", None)
+    total_toks = getattr(usage, "total_token_count", None)
+    parts = [f"prompt={prompt_toks}", f"thoughts={thoughts_toks}", f"candidates={candidates_toks}", f"total={total_toks}"]
+    log(f"Gemini answer ({attempt_label})", "INFO", f"token usage -- {', '.join(parts)}")
+
+
+def _gemini_finish_reason(resp) -> str:
+    """Best-effort extraction of finish_reason for diagnostics when text is empty."""
+    try:
+        candidates = getattr(resp, "candidates", None) or []
+        if candidates:
+            reason = getattr(candidates[0], "finish_reason", None)
+            return str(reason) if reason is not None else "unknown"
+    except Exception:
+        pass
+    return "unknown"
+
+
 def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
     """
     Returns the chosen option letter (e.g. "B"). Raises StageFailure if the
@@ -321,17 +353,28 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
 
     # thinking_level is tunable via THINKING_LEVEL (default "minimal" was
     # previously hardcoded here; now shared with Groq's reasoning_effort --
-    # see THINKING_LEVEL above). max_output_tokens is capped hard since the
-    # schema-constrained response is always a single letter -- this doesn't
-    # change correctness, but it removes any chance of the model padding
-    # output (e.g. restating the option text) and paying for tokens we
-    # discard.
+    # see THINKING_LEVEL above). NOTE: not every Gemini model supports every
+    # level -- e.g. gemini-3.7-flash rejects "minimal" outright (400 error),
+    # while gemini-3.5-flash-lite defaults to "minimal" and accepts it fine.
+    # We don't remap here (unlike Groq) since which levels a given
+    # GEMINI_MODEL supports can change per model; if you pick an
+    # unsupported level for your chosen model, the API will error clearly.
+    #
+    # max_output_tokens: thinking-capable Gemini models spend SOME tokens on
+    # internal reasoning even at "low"/"minimal", and those tokens count
+    # against max_output_tokens. Too small a budget (previously 8) causes
+    # MAX_TOKENS finish_reason with response.text/.parsed BOTH silently
+    # None -- not an exception, just an empty result -- confirmed 2026-09-05
+    # with gemini-3.7-flash at thinking_level=low (worked fine on
+    # gemini-3.5-flash-lite's default "minimal", which apparently uses
+    # ~0 thinking tokens). Same root cause as the earlier Groq
+    # json_validate_failed fix (20 -> 300); mirroring that headroom here.
     generation_config = genai_types.GenerateContentConfig(
         temperature=0,
         response_mime_type="text/x.enum",
         response_schema={"type": "STRING", "enum": valid_letters},
         thinking_config=genai_types.ThinkingConfig(thinking_level=THINKING_LEVEL),
-        max_output_tokens=8,
+        max_output_tokens=300,
         # No tools/functions are declared for this call -- explicitly turning
         # off automatic function calling avoids the SDK's unnecessary AFC
         # setup path (and the "not recommended" warning it logs).
@@ -378,7 +421,11 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
 
     def _try_once():
         resp = _call_gemini()
+        _log_gemini_usage(resp, attempt_label)
         text = (resp.text or "").strip().upper()
+        if not text:
+            reason = _gemini_finish_reason(resp)
+            log(f"Gemini answer ({attempt_label})", "INFO", f"empty response text (finish_reason={reason}) -- likely hit max_output_tokens on thinking tokens")
         match = re.search(r"[A-F]", text)
         return match.group(0) if match else None
 
