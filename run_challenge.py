@@ -892,17 +892,27 @@ async def main():
         log("Resolve bot", "INFO", f"resolved '@{CHALLENGE_BOT_USERNAME}' -> id={challenge_bot.id} ({mode_label})")
 
         if DEBUG_LOG_ALL_EVENTS:
+            # Scoped to the challenge bot's chat only (chats=challenge_bot),
+            # matching every other handler in this file. This used to be a
+            # bare events.NewMessage() with no chat filter -- that meant
+            # every single incoming message on the whole account (any group,
+            # any DM) ran this handler, including an await event.get_chat()
+            # RPC call per message. On a fresh/uncached chat that's a real
+            # network round-trip; a burst of unrelated group traffic could
+            # back up Telethon's single-threaded update dispatch and delay
+            # processing of other things on the same loop -- including the
+            # response to our own button click. Scoping to the bot's chat
+            # removes both the noise and the extra RPC (chat identity is
+            # already known -- it's always challenge_bot -- so get_chat()
+            # was redundant here regardless of the handler being global).
             async def _debug_any_event(event):
                 msg = event.message
-                chat = await event.get_chat()
-                chat_id = getattr(chat, "id", "?")
-                chat_title = getattr(chat, "title", getattr(chat, "username", "?"))
                 has_buttons = bool(msg.buttons)
                 preview = (msg.text or "").strip().replace("\n", " ")[:60]
                 log("DEBUG any event", "INFO",
-                    f"chat_id={chat_id} title='{chat_title}' has_buttons={has_buttons} preview='{preview}'")
-            client.add_event_handler(_debug_any_event, events.NewMessage())
-            log("DEBUG mode", "INFO", "logging ALL incoming events (any chat) alongside normal stages")
+                    f"chat_id={challenge_bot.id} has_buttons={has_buttons} preview='{preview}'")
+            client.add_event_handler(_debug_any_event, events.NewMessage(chats=challenge_bot))
+            log("DEBUG mode", "INFO", "logging all incoming events from the challenge bot chat only")
 
         # Login and bot resolution are done above, BEFORE this sleep, so the
         # very first "/start challenge_<N>" send below happens as close to
@@ -942,73 +952,120 @@ async def main():
             "Message bot / wait for Start Quiz",
         )
 
-        await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
-        start_quiz_click_time = time.monotonic()
-        log("Click Start Quiz", "OK", f"timer started")
-
         # From here on, use a fresh deadline for the quiz-answering phase --
         # it must not be truncated to whatever time was left on the Stage
         # 1/2 gating deadline above (e.g. 17:05 UTC in real mode), since the
         # quiz itself can legitimately run past that clock time once started.
         quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
 
-        # ---- Stage 3: answer each question ----
-        for q_num in range(1, TOTAL_QUESTIONS + 1):
-            stage = f"Question {q_num}/{TOTAL_QUESTIONS}"
+        # IMPORTANT: some real bots (confirmed via debug logs on the live
+        # BirrForex bot) send Question 1 immediately after "/start", in the
+        # same burst as the welcome/"Start Quiz" message -- NOT gated on the
+        # "Start Quiz" button click. test_bot.py models the opposite (Q1 is
+        # only sent once the button callback is received), which is why
+        # test mode never exposed this. If we click first and only start
+        # listening for Q1 afterwards, a Q1 that already arrived before (or
+        # during) the click is missed entirely -- the listener starts too
+        # late to see it, and the run hangs until QUIZ_TIMEOUT_MINUTES.
+        #
+        # Fix: start listening for the first post-welcome message from the
+        # bot BEFORE clicking, then click. Whichever happens to be true for
+        # this bot is covered -- a message already sitting there satisfies
+        # the wait immediately; a message that only shows up after the
+        # click still arrives at a listener that's already registered.
+        first_question_fut = asyncio.get_event_loop().create_future()
 
-            q_event = await wait_for_event_with_deadline(
-                client,
-                events.NewMessage(chats=challenge_bot),
-                quiz_deadline,
-                f"{stage}: wait for question",
-            )
-            q_message: Message = q_event.message
+        async def _first_question_handler(event):
+            # Ignore the "Start Quiz" welcome message itself -- Telethon
+            # identifies messages by (chat_id, id), so comparing ids is
+            # reliable even though both messages are in the same chat.
+            if event.message.id == start_quiz_message.id:
+                return
+            if not first_question_fut.done():
+                first_question_fut.set_result(event)
 
-            options = extract_mcq_options(q_message)
-            if not options:
-                raise StageFailure(stage, "message received but no answer buttons found")
+        client.add_event_handler(_first_question_handler, events.NewMessage(chats=challenge_bot))
 
-            question_text = q_message.text or ""
-            log(stage, "INFO", f"parsed {len(options)} options")
+        try:
+            await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
+            start_quiz_click_time = time.monotonic()
+            log("Click Start Quiz", "OK", f"timer started")
 
-            # ask_ai_for_answer() is a blocking, synchronous call (network
-            # I/O + time.sleep on retry). Run it in a worker thread so it
-            # doesn't freeze this event loop -- otherwise Telethon can't
-            # process anything else (including the eventual button click)
-            # until the call returns, which is what caused the apparent
-            # "stall" on Question 4.
-            answer_letter = await asyncio.to_thread(
-                ask_ai_for_answer, question_text, options, stage
-            )
-            answer_index = _LETTERS.index(answer_letter)
-            answer_text = options[answer_index] if answer_index < len(options) else "?"
-            log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
+            # ---- Stage 3: answer each question ----
+            for q_num in range(1, TOTAL_QUESTIONS + 1):
+                stage = f"Question {q_num}/{TOTAL_QUESTIONS}"
 
-            if q_num == TOTAL_QUESTIONS:
-                elapsed = time.monotonic() - start_quiz_click_time
-                if elapsed < MIN_SECONDS_SINCE_START_QUIZ:
-                    wait_for = MIN_SECONDS_SINCE_START_QUIZ - elapsed
-                    log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before final click")
-                    await asyncio.sleep(wait_for)
+                if q_num == 1:
+                    # May already be resolved (message arrived before or
+                    # during the click above) -- wait_for below returns
+                    # immediately in that case instead of blocking.
+                    remaining = (quiz_deadline - datetime.now(timezone.utc)).total_seconds()
+                    if remaining <= 0:
+                        raise StageFailure(f"{stage}: wait for question", "deadline already passed")
+                    log(f"{stage}: wait for question", "START", f"waiting up to {int(remaining)}s")
+                    try:
+                        q_event = await asyncio.wait_for(first_question_fut, timeout=remaining)
+                        log(f"{stage}: wait for question", "OK", "message received")
+                    except asyncio.TimeoutError:
+                        log(f"{stage}: wait for question", "TIMEOUT",
+                            f"no matching message before deadline ({quiz_deadline.isoformat()})")
+                        raise StageFailure(f"{stage}: wait for question", "timed out waiting for message")
+                else:
+                    q_event = await wait_for_event_with_deadline(
+                        client,
+                        events.NewMessage(chats=challenge_bot),
+                        quiz_deadline,
+                        f"{stage}: wait for question",
+                    )
+                q_message: Message = q_event.message
 
-            # Buttons were flattened row-by-row in extract_mcq_options; map
-            # the flat index back to (row, col) for the click.
-            flat_idx = 0
-            clicked = False
-            for row_idx, row in enumerate(q_message.buttons):
-                for col_idx, _ in enumerate(row):
-                    if flat_idx == answer_index:
-                        await click_button_or_follow_deep_link(client, q_message, row_idx, col_idx, stage)
-                        clicked = True
+                options = extract_mcq_options(q_message)
+                if not options:
+                    raise StageFailure(stage, "message received but no answer buttons found")
+
+                question_text = q_message.text or ""
+                log(stage, "INFO", f"parsed {len(options)} options")
+
+                # ask_ai_for_answer() is a blocking, synchronous call (network
+                # I/O + time.sleep on retry). Run it in a worker thread so it
+                # doesn't freeze this event loop -- otherwise Telethon can't
+                # process anything else (including the eventual button click)
+                # until the call returns, which is what caused the apparent
+                # "stall" on Question 4.
+                answer_letter = await asyncio.to_thread(
+                    ask_ai_for_answer, question_text, options, stage
+                )
+                answer_index = _LETTERS.index(answer_letter)
+                answer_text = options[answer_index] if answer_index < len(options) else "?"
+                log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
+
+                if q_num == TOTAL_QUESTIONS:
+                    elapsed = time.monotonic() - start_quiz_click_time
+                    if elapsed < MIN_SECONDS_SINCE_START_QUIZ:
+                        wait_for = MIN_SECONDS_SINCE_START_QUIZ - elapsed
+                        log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before final click")
+                        await asyncio.sleep(wait_for)
+
+                # Buttons were flattened row-by-row in extract_mcq_options; map
+                # the flat index back to (row, col) for the click.
+                flat_idx = 0
+                clicked = False
+                for row_idx, row in enumerate(q_message.buttons):
+                    for col_idx, _ in enumerate(row):
+                        if flat_idx == answer_index:
+                            await click_button_or_follow_deep_link(client, q_message, row_idx, col_idx, stage)
+                            clicked = True
+                            break
+                        flat_idx += 1
+                    if clicked:
                         break
-                    flat_idx += 1
-                if clicked:
-                    break
 
-            if not clicked:
-                raise StageFailure(stage, "failed to map answer letter to a button position")
+                if not clicked:
+                    raise StageFailure(stage, "failed to map answer letter to a button position")
 
-            log(stage, "OK", f"clicked option {answer_letter}")
+                log(stage, "OK", f"clicked option {answer_letter}")
+        finally:
+            client.remove_event_handler(_first_question_handler, events.NewMessage(chats=challenge_bot))
 
         log("Challenge flow", "OK", "all questions answered")
         flush_summary("SUCCESS ✅")
