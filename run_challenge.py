@@ -316,7 +316,7 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
         temperature=0,
         response_mime_type="text/x.enum",
         response_schema={"type": "STRING", "enum": valid_letters},
-        thinking_config=genai_types.ThinkingConfig(thinking_level="low"),
+        thinking_config=genai_types.ThinkingConfig(thinking_level="minimal"),
         max_output_tokens=8,
         # No tools/functions are declared for this call -- explicitly turning
         # off automatic function calling avoids the SDK's unnecessary AFC
