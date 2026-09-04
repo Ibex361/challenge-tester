@@ -174,6 +174,11 @@ GROQ_REASONING_SCHEMES = {
         # low maps to none (not default) since low signals "fast/shallow".
         "minimal": "none", "low": "none", "medium": "default", "high": "default",
     },
+    "compound": {
+        # I (not claude) added this. this apparently does not support
+        # thinking level too.
+        "minimal": "none", "low": "none", "medium": "default", "high": "default",
+    },
 }
 _DEFAULT_GROQ_SCHEME_NAME = "gpt-oss"
 
