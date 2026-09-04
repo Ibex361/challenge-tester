@@ -135,10 +135,39 @@ jobs:
           # instead of a second manual trigger. Logs go to test_bot.log so
           # they don't interleave unreadably with the tester's own output;
           # the log is printed at the end of the job either way.
-          nohup python test_bot.py > test_bot.log 2>&1 &
-          echo "Started test_bot.py in the background (PID $!)"
-          # Give it a moment to come up before the tester starts messaging it.
-          sleep 3
+          nohup python3 -u test_bot.py > test_bot.log 2>&1 &
+          echo "$!" > test_bot.pid
+          echo "Started test_bot.py in the background (PID $(cat test_bot.pid))"
+
+          # IMPORTANT: don't just sleep a fixed guess here. test_bot.py
+          # calls start_polling(drop_pending_updates=True) -- any /start
+          # message that arrives before that call has actually completed
+          # gets silently discarded by Telegram's polling library, not
+          # rejected with the "not active yet" text (that check happens
+          # further down, per-message, AFTER polling is live). A fixed
+          # sleep that's too short causes exactly that: total silence from
+          # the bot, no rejection, no answer, nothing -- because the
+          # tester's early messages never even reached the handler.
+          # Instead, poll the bot's own log for its "is up and listening"
+          # line (see test_bot.py) before letting the tester step run.
+          echo "Waiting for test bot to finish starting up..."
+          for i in $(seq 1 30); do
+            if grep -q "is up and listening" test_bot.log 2>/dev/null; then
+              echo "Test bot is ready (after ${i}s)."
+              break
+            fi
+            if ! kill -0 "$(cat test_bot.pid)" 2>/dev/null; then
+              echo "::error::test_bot.py exited before becoming ready -- see log below."
+              cat test_bot.log
+              exit 1
+            fi
+            sleep 1
+          done
+          if ! grep -q "is up and listening" test_bot.log 2>/dev/null; then
+            echo "::error::test bot did not report ready within 30s -- see log below."
+            cat test_bot.log
+            exit 1
+          fi
 
       - name: Run challenge flow
         env:
