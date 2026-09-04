@@ -54,6 +54,18 @@ on:
         description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
         type: string
         default: ""
+      groq_reasoning_effort:
+        description: "Groq reasoning effort: low (fastest, default), medium (Groq's own default, thinks more), or high"
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: low
+      prompt_extra_instruction:
+        description: "Optional extra sentence appended to the AI prompt (e.g. a careful-reading nudge). Leave blank for no change."
+        type: string
+        default: ""
 
 jobs:
   run-challenge:
@@ -198,6 +210,8 @@ jobs:
           TOTAL_QUESTIONS: "5"
           MIN_SECONDS_SINCE_START_QUIZ: "15"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
+          GROQ_REASONING_EFFORT: ${{ github.event.inputs.groq_reasoning_effort || 'low' }}
+          PROMPT_EXTRA_INSTRUCTION: ${{ github.event.inputs.prompt_extra_instruction }}
         run: |
           if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
             export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"

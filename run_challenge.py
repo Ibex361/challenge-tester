@@ -119,6 +119,21 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # developer tiers in August 2026; this is its recommended replacement.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
+# Tunable independently of code changes -- set to "low" (default, fastest),
+# "medium" (Groq's own default for this model, thinks more before
+# answering), or "high". Set via workflow input / env var so you can A/B
+# test speed vs. correctness across runs without editing this file.
+# Reading os.environ once at startup costs nothing at runtime either way.
+GROQ_REASONING_EFFORT = os.environ.get("GROQ_REASONING_EFFORT", "low")
+
+# Optional extra sentence appended to every prompt (both Groq and Gemini),
+# meant to nudge the model to read qualifying words/phrasing more carefully
+# before answering -- e.g. "in modern market", "NOT true", "FALSE" -- the
+# kind of wording that's easy to skim past. Empty by default (no change to
+# the prompt at all). Set PROMPT_EXTRA_INSTRUCTION to test a nudge; edit
+# its wording here without touching the rest of the prompt-building logic.
+PROMPT_EXTRA_INSTRUCTION = os.environ.get("PROMPT_EXTRA_INSTRUCTION", "")
+
 # Temporary diagnostic switch: when true, logs EVERY incoming message across
 # every chat (not just the ones we're filtering for), so we can see exactly
 # what Telethon is receiving. Turn off once things are working reliably.
@@ -226,10 +241,11 @@ _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in c
 
 def _build_prompt(question_text: str, options: list[str]) -> str:
     lettered = "\n".join(f"{_LETTERS[i]}) {opt}" for i, opt in enumerate(options))
+    extra = f" {PROMPT_EXTRA_INSTRUCTION}" if PROMPT_EXTRA_INSTRUCTION else ""
     return (
         "You are answering a multiple-choice question. "
         "Respond with ONLY the single letter of the correct option. "
-        "No words, no punctuation, no explanation — just the letter.\n\n"
+        f"No words, no punctuation, no explanation — just the letter.{extra}\n\n"
         f"Question: {question_text}\n\n"
         f"Options:\n{lettered}\n\n"
         "Answer (single letter only):"
@@ -362,16 +378,17 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
 
     # JSON Schema mode with strict=True forces the model to return exactly
     # {"answer": "<one of the valid letters>"} -- no free text, no
-    # explanation, nothing to parse out with a regex. reasoning_effort="low"
-    # is the lowest level Groq's live API accepts for this model ("none" is
-    # listed in some SDK type hints but the live API rejects it with a 400).
+    # explanation, nothing to parse out with a regex. reasoning_effort is
+    # tunable via GROQ_REASONING_EFFORT (default "low", the lowest level
+    # Groq's live API accepts for this model -- "none" is listed in some
+    # SDK type hints but the live API rejects it with a 400).
     # Important: gpt-oss-20b ALWAYS spends some tokens reasoning before the
     # JSON answer, even at "low" -- those reasoning tokens count against
     # max_completion_tokens. A too-low budget (e.g. 20) gets cut off mid-
     # reasoning before any JSON is written, causing a strict-mode
     # json_validate_failed 400. Give it enough headroom for the reasoning
-    # pass plus the short JSON answer; 300 is comfortably enough for a
-    # single-letter answer at low effort while still being fast.
+    # pass plus the short JSON answer; 300 is comfortably enough even at
+    # "medium" effort while still being fast.
     response_format = {
         "type": "json_schema",
         "json_schema": {
@@ -399,7 +416,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
                     temperature=0,
                     max_completion_tokens=300,
                     response_format=response_format,
-                    reasoning_effort="low",
+                    reasoning_effort=GROQ_REASONING_EFFORT,
                 )
             except Exception as e:
                 last_error = e
