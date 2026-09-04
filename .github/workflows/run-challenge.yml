@@ -11,6 +11,13 @@ on:
   # default, and you can still override it.
   workflow_dispatch:
     inputs:
+      account:
+        description: "Which Telegram testing account to run as -- SAF uses secret SAF_TG_SESSION, ETH uses secret ETH_TG_SESSION. Lets you fire two runs at once (e.g. comparing Gemini 3.5 Flash-Lite vs qwen3.6) without one logging the other's session out."
+        type: choice
+        options:
+          - SAF
+          - ETH
+        default: SAF
       test_mode:
         description: "Test mode: run against the throwaway test_bot.py instead of the real bot -- no challenge number needed"
         type: boolean
@@ -204,11 +211,37 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve Telegram session for selected account
+        id: resolve_account
+        env:
+          SAF_TG_SESSION: ${{ secrets.SAF_TG_SESSION }}
+          ETH_TG_SESSION: ${{ secrets.ETH_TG_SESSION }}
+        run: |
+          # Picks which of the two per-account session-string secrets to use,
+          # based on the "account" dropdown -- lets SAF and ETH runs fire
+          # concurrently (e.g. one on Gemini 3.5 Flash-Lite, one on
+          # qwen3.6-27b) each logged into its own separate Telegram account,
+          # with no shared state between the two jobs. Masked so it never
+          # appears in logs, same as any other secret-derived value.
+          account="${{ github.event.inputs.account || 'SAF' }}"
+          if [ "$account" == "SAF" ]; then
+            session="$SAF_TG_SESSION"
+          else
+            session="$ETH_TG_SESSION"
+          fi
+          if [ -z "$session" ]; then
+            echo "::error::Secret ${account}_TG_SESSION is empty or not set."
+            exit 1
+          fi
+          echo "::add-mask::$session"
+          echo "session=$session" >> "$GITHUB_OUTPUT"
+          echo "Using Telegram account: $account"
+
       - name: Run challenge flow
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
-          TG_SESSION: ${{ secrets.TG_SESSION }}
+          TG_SESSION: ${{ steps.resolve_account.outputs.session }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
