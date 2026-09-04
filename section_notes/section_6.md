@@ -102,8 +102,3 @@ Stated as separate, simple/easy order types tied to an open position, that the b
 - Entry: **EUR/USD Buy** at **1.008**
 - **Take Profit** set at **1.012** → if price rises to 1.012, position closes automatically in profit.
 - **Stop Loss** set at **1.006** → if price falls to 1.006 instead, position closes automatically at a loss.
-
-## 5. Closing Notes from the Video
-- Explicitly described as a "simple concept," especially useful and important for beginners to understand clearly.
-- Reminder given (as usual) that a companion PDF module exists with more depth, linked in the video description.
-- **Next section preview (stated explicitly): Leverage** — described as an "interesting topic."
