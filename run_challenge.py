@@ -119,24 +119,72 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # developer tiers in August 2026; this is its recommended replacement.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
+
+def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str) -> str:
+    """Look up model_name in GROQ_REASONING_SCHEMES (substring match) and
+    return the reasoning_effort value for the given THINKING_LEVEL. Falls
+    back to the gpt-oss scheme for unrecognized models, with a log note --
+    see GROQ_REASONING_SCHEMES above for why this is a lookup table rather
+    than if/elif branching."""
+    # NOTE: this runs at module-load time, before the log() helper is
+    # defined further down the file -- use plain print() here, not log().
+    model_lower = model_name.lower()
+    for family_substring, scheme in GROQ_REASONING_SCHEMES.items():
+        if family_substring in model_lower:
+            return scheme[thinking_level]
+    print(
+        f"[Startup] ℹ️ GROQ_MODEL '{model_name}' isn't in GROQ_REASONING_SCHEMES -- "
+        f"falling back to the '{_DEFAULT_GROQ_SCHEME_NAME}' reasoning_effort "
+        "scheme. If this model rejects that value, add a new entry to "
+        "GROQ_REASONING_SCHEMES for it.",
+        flush=True,
+    )
+    return GROQ_REASONING_SCHEMES[_DEFAULT_GROQ_SCHEME_NAME][thinking_level]
+
 # Unified thinking/reasoning-effort control for BOTH providers, so you can
 # A/B test speed vs. correctness with one input regardless of which
 # provider is active. Accepts "minimal", "low" (default, fastest),
 # "medium", or "high".
 #   - Gemini 3 (gemini-3.5-flash-lite) natively supports all four values
 #     via thinking_level -- passed straight through, see ask_gemini_for_answer.
-#   - Groq's API only accepts "low"/"medium"/"high" for this model (it
-#     rejects both "none" and "minimal" with a 400, despite "none" being
-#     listed in some SDK type hints) -- so "minimal" is mapped down to
-#     "low" for Groq specifically, since that's the closest valid value.
-#     See ask_groq_for_answer.
+#   - Groq model families each expose a DIFFERENT reasoning_effort scheme
+#     (confirmed against Groq's live API, 2026-09):
+#       * gpt-oss-20b / gpt-oss-120b -> only "low"/"medium"/"high" (both
+#         "none" and "minimal" get a 400, despite "none" appearing in some
+#         SDK type hints).
+#       * qwen3.6-27b -> only "none"/"default" (a 400 on anything else,
+#         including "low"/"medium"/"high") -- it's a binary reasoning
+#         on/off switch, not a graduated dial.
+#     GROQ_REASONING_SCHEMES below is a per-model-family lookup (matched by
+#     model-name substring) so adding a future Groq model with yet another
+#     scheme is a one-entry addition here, not new branching logic. Each
+#     entry maps all 4 THINKING_LEVEL tiers onto that family's own valid
+#     values. Unrecognized models fall back to the gpt-oss scheme (today's
+#     default behavior) and log a note -- see GROQ_REASONING_EFFORT below.
+GROQ_REASONING_SCHEMES = {
+    # substring matched against GROQ_MODEL, case-insensitive, checked in
+    # order -- keep more-specific substrings above their broader relatives.
+    "gpt-oss": {
+        "minimal": "low", "low": "low", "medium": "medium", "high": "high",
+    },
+    "qwen3.6": {
+        # No graduated levels exist on this model -- minimal AND low both
+        # mean "don't bother reasoning", medium/high both mean "use the
+        # model's own (fixed-depth) reasoning pass". Per user preference,
+        # low maps to none (not default) since low signals "fast/shallow".
+        "minimal": "none", "low": "none", "medium": "default", "high": "default",
+    },
+}
+_DEFAULT_GROQ_SCHEME_NAME = "gpt-oss"
+
 THINKING_LEVEL = os.environ.get("THINKING_LEVEL", "low").strip().lower()
 _VALID_THINKING_LEVELS = ("minimal", "low", "medium", "high")
 if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
     raise SystemExit(f"THINKING_LEVEL must be one of {_VALID_THINKING_LEVELS}, got {THINKING_LEVEL!r}")
 
-# Groq-specific value derived from THINKING_LEVEL -- see note above.
-GROQ_REASONING_EFFORT = "low" if THINKING_LEVEL == "minimal" else THINKING_LEVEL
+# Groq-specific value derived from THINKING_LEVEL + GROQ_MODEL -- see
+# GROQ_REASONING_SCHEMES and _resolve_groq_reasoning_effort above.
+GROQ_REASONING_EFFORT = _resolve_groq_reasoning_effort(GROQ_MODEL, THINKING_LEVEL)
 
 # Optional extra sentence appended to every prompt (both Groq and Gemini),
 # meant to nudge the model to read qualifying words/phrasing more carefully
