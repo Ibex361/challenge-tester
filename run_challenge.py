@@ -175,6 +175,11 @@ def _load_section_notes() -> str:
 
 SECTION_NOTES_TEXT = _load_section_notes()
 
+# Temporary diagnostic switch: when true, logs EVERY incoming message across
+# every chat (not just the ones we're filtering for), so we can see exactly
+# what Telethon is receiving. Turn off once things are working reliably.
+DEBUG_LOG_ALL_EVENTS = os.environ.get("DEBUG_LOG_ALL_EVENTS", "false").lower() == "true"
+
 
 
 
