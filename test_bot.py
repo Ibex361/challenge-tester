@@ -259,12 +259,191 @@ QUIZ_3_CFD = [
     },
 ]
 
+# -- Section 6: Position Sizing, Order Types and Placing Your Trades --
+# NEW 2026-09-05: 15 questions written by Claude from the user's uploaded
+# Section 6 PDF module (position sizing/lots, order flow, order types,
+# risk management orders), split into 3 new fixed 5-question quizzes
+# (quiz4/5/6) matching the module's own internal structure -- not derived
+# from the earlier section_6.md video-transcript notes, though a couple
+# of non-conflicting details from those notes are folded in where the PDF
+# itself doesn't give a number (flagged inline below). No video-reference
+# ("in the Section Video...") questions here -- the PDF is a static
+# document, not a video, so nothing is unanswerable-from-text the way
+# QUIZ_2's video questions are.
+
+# -- Position Sizing: Lots --
+QUIZ_4_POSITION_SIZING = [
+    {
+        "text": "How many units of the base currency does 1 Standard Lot represent?",
+        "options": ["1,000", "10,000", "100,000", "1,000,000"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which of the following correctly matches a lot size to its unit value?\n"
+            "A) Mini Lot = 100,000 units\n"
+            "B) Micro Lot = 10,000 units\n"
+            "C) Standard Lot = 1,000 units\n"
+            "D) Micro Lot = 1,000 units"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+    },
+    {
+        "text": "In a Cent account, what changes compared to a standard account, according to the module?",
+        "options": [
+            "The lot and unit structure changes completely",
+            "The balance is shown in cents, so real-money exposure is much smaller for the same lot/unit structure",
+            "Only micro lots are allowed",
+            "Leverage is automatically increased",
+        ],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "According to the module's Gold, Oil, and Bitcoin examples, which of the following is TRUE?\n"
+            "A) 1 standard lot of Oil is defined as 1,000 barrels\n"
+            "B) 1 standard lot of Gold (XAU/USD) is 1,000 troy ounces\n"
+            "C) 1 standard lot of Bitcoin is always exactly 1 Bitcoin at every broker\n"
+            "D) Lot sizes for non-currency instruments never vary between brokers"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+    {
+        "text": "In the EUR/USD pip value example, a 1-pip move (1.0000 to 1.0001) on 1 Mini Lot is worth approximately how much profit/loss?",
+        "options": ["$10", "$1", "$0.10", "$100"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+]
+
+# -- Order Flow and Order Types --
+QUIZ_5_ORDER_TYPES = [
+    {
+        "text": "When you place a Buy or Sell order, what does the module say the broker does with it?",
+        "options": [
+            "Executes it internally with no counterparty",
+            "Routes it into the broader market network to match it with a counterparty willing to take the opposite side",
+            "Holds it until the end of the trading day",
+            "Sends it directly to a central government exchange",
+        ],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which statement about a Market Order is TRUE according to the module?\n"
+            "A) It guarantees the exact requested price but not execution\n"
+            "B) It guarantees execution at the current best available price, but not the exact price during fast-moving markets\n"
+            "C) It only executes once a specific future price level is reached\n"
+            "D) It is a type of pending order"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": "The difference between a requested price and the actual executed price during a fast-moving market is called:",
+        "options": ["Spread", "Slippage", "Margin call", "Rollover"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which pending order places a Buy order ABOVE the current market price, expecting price to break up through that level and keep rising?\n"
+            "A) Buy Limit\n"
+            "B) Sell Limit\n"
+            "C) Buy Stop\n"
+            "D) Sell Stop"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+    {
+        "text": "Which order type combines a Stop and a Limit, triggering a Limit order only once the Stop price is hit?",
+        "options": ["Trailing Stop Loss", "Market Order", "Stop-Limit Order", "Take Profit"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+]
+
+# -- Order Diagrams and Risk Management Orders --
+QUIZ_6_RISK_ORDERS = [
+    {
+        "text": (
+            "A Sell Limit order is placed expecting which price behavior, according to the module's diagram?\n"
+            "A) Price rises to your level then falls\n"
+            "B) Price falls to your level then rises\n"
+            "C) Price breaks up and keeps rising\n"
+            "D) Price breaks down and keeps falling"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+    {
+        "text": "A Sell Stop order is placed BELOW the current market price, expecting:",
+        "options": [
+            "Price to break down through that level and continue falling",
+            "Price to fall to that level then bounce back up",
+            "Price to rise to that level then reverse down",
+            "Price to stay flat at that level",
+        ],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which order automatically closes an open position if the price moves AGAINST it to a predefined level, to limit potential loss?\n"
+            "A) Take Profit\n"
+            "B) Stop Loss\n"
+            "C) Trailing Stop Loss\n"
+            "D) Buy Limit"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": "What does a Take Profit (TP) order do, according to the module?",
+        "options": [
+            "Automatically closes a position at a loss once price moves against you",
+            "Automatically closes a position when price reaches a predefined profit level, locking in gains",
+            "Increases your position size automatically as profit grows",
+            "Cancels all other pending orders on the account",
+        ],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which of the following best describes a Trailing Stop Loss?\n"
+            "A) A fixed Stop Loss that never moves once set\n"
+            "B) A dynamic Stop Loss that automatically moves in your favor as price moves, only ever moving in the profit direction\n"
+            "C) An order that only works on pending orders, not open positions\n"
+            "D) A Stop Loss that moves against you to reduce broker risk"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
     "quiz1": QUIZ_1_FOREX_BROKERS,
     "quiz2": QUIZ_2_CURRENCY_PAIRS,
     "quiz3": QUIZ_3_CFD,
+    "quiz4": QUIZ_4_POSITION_SIZING,
+    "quiz5": QUIZ_5_ORDER_TYPES,
+    "quiz6": QUIZ_6_RISK_ORDERS,
 }
 
 TOTAL_QUESTIONS = 5

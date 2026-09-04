@@ -35,13 +35,16 @@ on:
         type: string
         default: ""
       test_quiz_selection:
-        description: "Test mode only: which fixed quiz session to run. quiz2 includes the 2 video-reference questions (unanswerable from text alone). random picks one of the 3 each run."
+        description: "Test mode only: which fixed quiz session to run. quiz2 includes the 2 video-reference questions (unanswerable from text alone). quiz4/5/6 are Section 6 (Position Sizing/Order Types/Risk Orders). random picks one of all 6 each run."
         type: choice
         options:
           - random
           - quiz1
           - quiz2
           - quiz3
+          - quiz4
+          - quiz5
+          - quiz6
         default: random
       challenge_number:
         description: "Challenge number to run (e.g. 34 -> sends '/start challenge_34' to the bot). Not needed if test_mode is checked."
