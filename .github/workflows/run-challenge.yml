@@ -71,7 +71,15 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # test_bot.py (used only in test mode) needs python-telegram-bot,
+          # which lives in its own requirements file -- the old separate
+          # "Run Test Bot" workflow installed this on its own; now that
+          # both scripts can run in the same job, both requirement files
+          # need installing here regardless of test_mode (cheap either way,
+          # and keeps this step simple/unconditional).
+          pip install -r requirements-test-bot.txt
 
       - name: Validate inputs
         run: |
