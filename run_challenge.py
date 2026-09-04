@@ -134,10 +134,48 @@ GROQ_REASONING_EFFORT = os.environ.get("GROQ_REASONING_EFFORT", "low")
 # its wording here without touching the rest of the prompt-building logic.
 PROMPT_EXTRA_INSTRUCTION = os.environ.get("PROMPT_EXTRA_INSTRUCTION", "")
 
-# Temporary diagnostic switch: when true, logs EVERY incoming message across
-# every chat (not just the ones we're filtering for), so we can see exactly
-# what Telethon is receiving. Turn off once things are working reliably.
-DEBUG_LOG_ALL_EVENTS = os.environ.get("DEBUG_LOG_ALL_EVENTS", "false").lower() == "true"
+# Optional section reference notes -- extracted/summarized info from a
+# section's video, attached in full to EVERY question's prompt for this
+# run (not per-question matching -- simpler, and the token cost is small
+# relative to Groq's speed). Lets the AI answer "in the Section Video..."
+# style questions, and others where a fact (not just more reasoning) was
+# the actual gap -- see 2026-09-04 session notes in context.json.
+#
+# HOW TO ADD/UPDATE NOTES (no code editing needed): drop a Markdown file
+# into the section_notes/ folder via GitHub's web UI (Add file -> Create
+# new file). Name it after the section, e.g. section_notes/section_5.md.
+# Then set SECTION_NOTES to that filename without the .md extension (e.g.
+# "section_5") via the workflow's section_notes input / this env var.
+# Leave blank/unset for no notes attached (old behavior, unchanged).
+SECTION_NOTES_NAME = os.environ.get("SECTION_NOTES", "").strip()
+SECTION_NOTES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "section_notes")
+
+
+def _load_section_notes() -> str:
+    """
+    Reads section_notes/<SECTION_NOTES_NAME>.md if set, else returns "".
+    Missing file prints a plain warning and continues with no notes (never
+    fails the run over this -- notes are a prompt enhancement, not a
+    requirement). Uses plain print/logging here, not the log() stage
+    helper below, since this runs at import time before log() exists and
+    before the GitHub summary machinery is set up.
+    """
+    if not SECTION_NOTES_NAME:
+        return ""
+    path = os.path.join(SECTION_NOTES_DIR, f"{SECTION_NOTES_NAME}.md")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            notes = f.read().strip()
+        print(f"[section notes] Loaded {path} ({len(notes)} chars)")
+        return notes
+    except FileNotFoundError:
+        print(f"[section notes] WARNING: SECTION_NOTES={SECTION_NOTES_NAME!r} but {path} was not found -- continuing with no notes")
+        return ""
+
+
+SECTION_NOTES_TEXT = _load_section_notes()
+
+
 
 
 # ----------------------------------------------------------------------
@@ -242,7 +280,12 @@ _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in c
 def _build_prompt(question_text: str, options: list[str]) -> str:
     lettered = "\n".join(f"{_LETTERS[i]}) {opt}" for i, opt in enumerate(options))
     extra = f" {PROMPT_EXTRA_INSTRUCTION}" if PROMPT_EXTRA_INSTRUCTION else ""
+    # Section reference notes (if SECTION_NOTES is set) go in full ahead of
+    # the question -- same block reused for every question this run, not
+    # matched per-question. See SECTION_NOTES_TEXT / _load_section_notes above.
+    notes_block = f"Reference notes for this section:\n{SECTION_NOTES_TEXT}\n\n" if SECTION_NOTES_TEXT else ""
     return (
+        f"{notes_block}"
         "You are answering a multiple-choice question. "
         "Respond with ONLY the single letter of the correct option. "
         f"No words, no punctuation, no explanation — just the letter.{extra}\n\n"

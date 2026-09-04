@@ -71,6 +71,10 @@ on:
         description: "Optional extra sentence appended to the AI prompt (e.g. a careful-reading nudge). Leave blank for no change."
         type: string
         default: ""
+      section_notes:
+        description: "Optional: filename (no .md) of extracted section notes to attach to every question's prompt, e.g. section_5. See section_notes/README.md. Leave blank for no notes. Independent of test_quiz_selection -- set both if testing a matching quiz+notes pair."
+        type: string
+        default: ""
 
 jobs:
   run-challenge:
@@ -217,6 +221,7 @@ jobs:
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
           GROQ_REASONING_EFFORT: ${{ github.event.inputs.groq_reasoning_effort || 'low' }}
           PROMPT_EXTRA_INSTRUCTION: ${{ github.event.inputs.prompt_extra_instruction }}
+          SECTION_NOTES: ${{ github.event.inputs.section_notes }}
         run: |
           if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
             export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"
