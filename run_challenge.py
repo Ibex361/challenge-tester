@@ -72,6 +72,40 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
     "START_QUIZ_TEXT_HINTS", "start quiz,start"
 ).split(",")
 
+# Controls how the "Start Quiz" button click is handled -- NOT the per-answer
+# clicks later, which are always awaited normally (correctness there matters
+# too much to risk). This exists because message.click() on a callback
+# button awaits Telegram's GetBotCallbackAnswerRequest, which blocks until
+# the BOT's own backend responds -- confirmed on two separate live accounts
+# (2026-09-04) to take ~15s under real 17:00 UTC load, most likely the bot's
+# backend queuing ~300 near-simultaneous callback queries. Since Question 1
+# has also been confirmed to arrive independent of this click (see
+# _first_question_handler in main()), that ~15s wait may be pure dead
+# weight sitting in the critical path of a fastest-submission-wins quiz.
+# Three modes, chosen via the START_QUIZ_CLICK_MODE workflow input, so this
+# can be safely A/B tested across a few live runs before committing to one:
+#   "await"           (default/current behavior) -- click and wait for
+#                      Telegram's confirmation before proceeding. Safest;
+#                      guaranteed not to change behavior if the click turns
+#                      out to matter after all.
+#   "fire_and_forget"  -- send the click but don't wait for the bot's
+#                      response; proceed to waiting for Q1 immediately.
+#                      Risky ONLY if the bot's callback response is what
+#                      actually flips some server-side "quiz started" state
+#                      needed before it'll accept an answer -- untested
+#                      against the real bot, hence being an option rather
+#                      than the new default.
+#   "skip"             -- don't click at all. Only safe if the button is
+#                      truly decorative once Q1 has already been sent
+#                      (matches what we've observed so far: no second
+#                      message or other effect was ever seen following this
+#                      click in a live run) -- again, untested as a
+#                      guarantee, hence opt-in.
+START_QUIZ_CLICK_MODE = os.environ.get("START_QUIZ_CLICK_MODE", "await").strip().lower()
+if START_QUIZ_CLICK_MODE not in ("await", "fire_and_forget", "skip"):
+    print(f"::error::START_QUIZ_CLICK_MODE must be 'await', 'fire_and_forget', or 'skip' (got '{START_QUIZ_CLICK_MODE}')", file=sys.stderr)
+    sys.exit(1)
+
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "15"))
 
@@ -690,8 +724,15 @@ def parse_telegram_deep_link(url: str):
 
     return bot_username, payload
 
+# Tracks background tasks spawned by click_button_or_follow_deep_link's
+# fire_and_forget mode, so main() can give them a bounded chance to finish
+# (and log their actual duration) before disconnecting -- rather than the
+# client tearing down mid-request and silently discarding that diagnostic
+# data. See the "Wait briefly for any fire_and_forget click" step in main().
+_background_click_tasks: list = []
 
-async def click_button_or_follow_deep_link(client, message, row, col, stage_name):
+
+async def click_button_or_follow_deep_link(client, message, row, col, stage_name, click_mode="await"):
     """
     Clicks a button the way a real user tap would behave, handling both
     button kinds correctly:
@@ -706,6 +747,16 @@ async def click_button_or_follow_deep_link(client, message, row, col, stage_name
       - Any other URL (not a recognized bot deep link): we can't safely
         automate arbitrary link-opening, so this raises a clear failure
         rather than silently doing nothing.
+    click_mode only affects the callback-button case ("await", the default,
+    is used unconditionally for URL buttons and by the per-answer callers,
+    which always pass the default -- see START_QUIZ_CLICK_MODE's comment
+    for why this is opt-in and Start-Quiz-only):
+      - "await": click and wait for Telegram's confirmation as before.
+      - "fire_and_forget": send the click, don't wait for the bot's
+        response -- return immediately so the caller can move on to
+        whatever's next (e.g. waiting for Q1) without sitting through the
+        bot's slow callback-answer time.
+      - "skip": don't click at all.
     Returns the bot entity that should be used for the rest of the flow.
     """
     button = message.buttons[row][col]
@@ -727,6 +778,10 @@ async def click_button_or_follow_deep_link(client, message, row, col, stage_name
         log(stage_name, "OK", f"sent '{start_command}' to @{bot_username}")
         return bot_entity
 
+    if click_mode == "skip":
+        log(stage_name, "OK", "click skipped (START_QUIZ_CLICK_MODE=skip)")
+        return None
+
     # Not a URL button -> normal callback button, .click() is correct here.
     # Time the call itself: message.click() performs Telegram's
     # GetBotCallbackAnswer RPC, which Telegram forwards to the bot's own
@@ -738,6 +793,25 @@ async def click_button_or_follow_deep_link(client, message, row, col, stage_name
     # 2026-09-04, with no flood-wait log line and no sleep() in this code
     # path -- so the time was spent inside Telegram/the bot, not here).
     click_started = time.monotonic()
+
+    if click_mode == "fire_and_forget":
+        # Schedule the click as a background task instead of awaiting it.
+        # We still log how long it actually took once it eventually
+        # completes, so fire_and_forget runs remain comparable to await
+        # runs for A/B timing purposes -- we just don't block on it here.
+        async def _click_and_log():
+            try:
+                await message.click(row, col)
+                duration = time.monotonic() - click_started
+                log(stage_name, "OK", f"clicked callback button, response received in background ({duration:.1f}s)")
+            except Exception as e:
+                log(stage_name, "INFO", f"background click raised {type(e).__name__}: {e} (ignored -- fire_and_forget)")
+
+        task = asyncio.create_task(_click_and_log())
+        _background_click_tasks.append(task)
+        log(stage_name, "OK", "clicked callback button (fire_and_forget -- not waiting for response)")
+        return None
+
     await message.click(row, col)
     click_duration = time.monotonic() - click_started
     log(stage_name, "OK", f"clicked callback button ({click_duration:.1f}s)")
@@ -1005,7 +1079,7 @@ async def main():
             # that clock time once started.
             quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
 
-            await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
+            await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz", click_mode=START_QUIZ_CLICK_MODE)
             log("Click Start Quiz", "OK", f"timer started")
 
             # ---- Stage 3: answer each question ----
@@ -1102,6 +1176,18 @@ async def main():
         flush_summary(f"FAILED (unexpected) — {e}")
         raise
     finally:
+        if _background_click_tasks:
+            # Give any fire_and_forget click(s) a bounded chance to finish
+            # and log their actual duration before we tear down the
+            # connection out from under them. 20s is comfortably above the
+            # ~15s we've measured live, with headroom; if it's still
+            # pending after that, disconnect anyway rather than hang the
+            # job -- the click_mode=await path remains available if this
+            # data is critical to capture reliably.
+            pending = [t for t in _background_click_tasks if not t.done()]
+            if pending:
+                log("Cleanup", "INFO", f"waiting up to 20s for {len(pending)} background click(s) to finish")
+                await asyncio.wait(pending, timeout=20)
         await client.disconnect()
 
 
