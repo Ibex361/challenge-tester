@@ -123,8 +123,19 @@ MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUI
 #
 # Real mode and test mode both follow this exact same shape, just anchored
 # to a different open time:
-#   - real mode  -> CHALLENGE_OPEN_TIME_UTC        (default 17:00 UTC, the
-#                    real challenge's actual go-live time)
+#   - real mode  -> CHALLENGE_OPEN_TIME_UTC        (default 17:00:01 UTC --
+#                    NOT a plain 17:00. Deliberately offset by 1 second, and
+#                    intentionally NOT exposed as a workflow_dispatch input
+#                    -- only settable via a GitHub secret/repo variable
+#                    wired into this env var directly, so it can't be
+#                    fat-fingered per-run from the Actions UI. See
+#                    2026-09-05 notes: the confirmed ~15s Start-Quiz-click
+#                    latency under real 17:00 UTC load might be worse for a
+#                    request landing at the EXACT instant the challenge
+#                    opens (thundering-herd-style burst) than one landing a
+#                    beat later -- unconfirmed, but cheap to hedge against,
+#                    and this makes the offset itself easy to A/B tune
+#                    later without a code change.)
 #   - test mode  -> TEST_ACTIVATION_TIME_UTC        (whatever you set when
 #                    you start the test bot, e.g. "13:00" -- test_bot.py
 #                    enforces the exact same gate on its side, so test mode
@@ -137,7 +148,7 @@ MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUI
 # for, and 5 minutes of retrying after open time is enough to absorb the
 # bot being a beat late to actually activate.
 CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
-CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00")          # HH:MM, UTC -- real mode
+CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00:01")       # HH:MM[:SS], UTC -- real mode, secret-controlled only (see comment above)
 TEST_ACTIVATION_TIME_UTC = os.environ.get("TEST_ACTIVATION_TIME_UTC")                # HH:MM, UTC -- test mode
 EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "15"))
 RETRY_WINDOW_MINUTES_AFTER_OPEN = float(os.environ.get("RETRY_WINDOW_MINUTES_AFTER_OPEN", "5"))
@@ -386,11 +397,21 @@ class StageFailure(Exception):
         super().__init__(f"{stage}: {detail}")
 
 
-def today_utc_at(hh_mm: str) -> datetime:
-    """Parses 'HH:MM' into a UTC datetime for the current UTC calendar day."""
-    hour, minute = (int(p) for p in hh_mm.split(":"))
+def today_utc_at(hh_mm_or_hhmmss: str) -> datetime:
+    """
+    Parses 'HH:MM' or 'HH:MM:SS' into a UTC datetime for the current UTC
+    calendar day. Seconds default to 0 if omitted, for backward
+    compatibility with existing HH:MM values (e.g. TEST_ACTIVATION_TIME_UTC
+    inputs, which stay HH:MM-only). CHALLENGE_OPEN_TIME_UTC is the one
+    real-mode value that actually uses seconds precision -- see its own
+    definition/comment for why (2026-09-05: real vs. test 15s Start-Quiz-
+    click-latency investigation).
+    """
+    parts = [int(p) for p in hh_mm_or_hhmmss.split(":")]
+    hour, minute = parts[0], parts[1]
+    second = parts[2] if len(parts) > 2 else 0
     now = datetime.now(timezone.utc)
-    return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return now.replace(hour=hour, minute=minute, second=second, microsecond=0)
 
 
 # ----------------------------------------------------------------------
