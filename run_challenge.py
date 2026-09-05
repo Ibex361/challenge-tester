@@ -403,20 +403,87 @@ _groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in case
 
 
+def _options_are_bare_letters(options: list[str]) -> bool:
+    """
+    Detects the challenge bot's two confirmed real button styles (see
+    inspect_bot_buttons.py output from 2026-09-04): Q2-Q4 put full option
+    text on each button ("A) Stop", "B) Limit", ...), while Q1/Q5 use bare
+    single-letter buttons ("A", "B", "C", "D") with the actual option text
+    written into the question message itself instead. extract_mcq_options()
+    can't distinguish these -- it just returns button.text either way -- so
+    _build_prompt() needs to know which style it got to avoid asking the AI
+    to choose between meaningless single-letter "options" ("A) A", "B) B",
+    ...) when the button text carries no real information.
+
+    Matching against the EXPECTED letter for each position (not just "is
+    this option a single character") is deliberate: an option whose real
+    text genuinely happens to be a single letter (unlikely here, but not
+    impossible in general) won't be misdetected unless it also happens to
+    be the correct positional letter for every option in the message --
+    that combination is not realistically going to occur by coincidence.
+    """
+    if not options:
+        return False
+    return all(opt.strip().upper() == _LETTERS[i] for i, opt in enumerate(options) if i < len(_LETTERS))
+
+
+def _strip_redundant_letter_prefix(option_text: str, letter: str) -> str:
+    """
+    Strips a leading "<letter>) " prefix from option_text if it's already
+    there (case-insensitive) -- some sources (test_bot.py's non-bare-letter
+    style, possibly some real question types) put the letter on the button
+    text itself. Used wherever we're about to prepend our own letter, so
+    the result never doubles up as "A) A) Stop".
+    """
+    stripped = option_text.strip()
+    prefix = f"{letter})"
+    if stripped.upper().startswith(prefix.upper()):
+        return stripped[len(prefix):].strip()
+    return stripped
+
+
 def _build_prompt(question_text: str, options: list[str]) -> str:
-    lettered = "\n".join(f"{_LETTERS[i]}) {opt}" for i, opt in enumerate(options))
     extra = f" {PROMPT_EXTRA_INSTRUCTION}" if PROMPT_EXTRA_INSTRUCTION else ""
     # Section reference notes (if SECTION_NOTES is set) go in full ahead of
     # the question -- same block reused for every question this run, not
     # matched per-question. See SECTION_NOTES_TEXT / _load_section_notes above.
     notes_block = f"Reference notes for this section:\n{SECTION_NOTES_TEXT}\n\n" if SECTION_NOTES_TEXT else ""
+
+    if _options_are_bare_letters(options):
+        # Don't emit a fabricated "Options:" block (it would literally read
+        # "A) A", "B) B", ... — actively misleading, not just uninformative)
+        # -- tell the model plainly that the lettered options are already
+        # written into the question text above, matching what's really true
+        # for this bot's Q1/Q5 style.
+        options_block = (
+            f"The {len(options)} answer choices ({', '.join(_LETTERS[:len(options)])}) "
+            "are written directly in the question text above (e.g. \"A) ...\", \"B) ...\"). "
+            "Pick the correct one and respond with its letter."
+        )
+    else:
+        # Buttons here carry real option text, but some sources (e.g.
+        # test_bot.py's non-bare_letters style, and possibly some real
+        # question types) already prefix it with "A) ", "B) ", etc. -- if
+        # we blindly prepend another letter on top, the result is a
+        # confusing double-lettered line like "A) A) Stop". Strip a
+        # pre-existing "<matching letter>) " prefix (case-insensitive)
+        # before re-adding it, so the prompt shows each option's letter
+        # exactly once regardless of which style this particular message
+        # used.
+        cleaned = []
+        for i, opt in enumerate(options):
+            letter = _LETTERS[i] if i < len(_LETTERS) else ""
+            cleaned.append(_strip_redundant_letter_prefix(opt, letter) if letter else opt.strip())
+        lettered = "\n".join(f"{_LETTERS[i]}) {opt}" for i, opt in enumerate(cleaned))
+        options_block = f"Options:\n{lettered}"
+
     return (
         f"{notes_block}"
         "You are answering a multiple-choice question. "
         "Respond with ONLY the single letter of the correct option. "
         f"No words, no punctuation, no explanation — just the letter.{extra}\n\n"
         f"Question: {question_text}\n\n"
-        f"Options:\n{lettered}\n\n"
+        f"{options_block}\n\n"
         "Answer (single letter only):"
     )
 
@@ -1127,7 +1194,10 @@ async def main():
                     raise StageFailure(stage, "message received but no answer buttons found")
 
                 question_text = q_message.text or ""
-                log(stage, "INFO", f"parsed {len(options)} options")
+                bare_letters = _options_are_bare_letters(options)
+                log(stage, "INFO",
+                    f"parsed {len(options)} options"
+                    + (" (bare-letter buttons -- real option text is in the question)" if bare_letters else ""))
 
                 # ask_ai_for_answer() is a blocking, synchronous call (network
                 # I/O + time.sleep on retry). Run it in a worker thread so it
@@ -1139,8 +1209,15 @@ async def main():
                     ask_ai_for_answer, question_text, options, stage
                 )
                 answer_index = _LETTERS.index(answer_letter)
-                answer_text = options[answer_index] if answer_index < len(options) else "?"
-                log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
+                if bare_letters:
+                    # options[answer_index] is just the letter itself here
+                    # (e.g. "A") -- not real content, so don't present it as
+                    # if it were the chosen option's text; say plainly that
+                    # the real text lives in the question message instead.
+                    log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter} (option text is in the question above, not the button)")
+                else:
+                    answer_text = _strip_redundant_letter_prefix(options[answer_index], answer_letter) if answer_index < len(options) else "?"
+                    log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
 
                 if q_num == TOTAL_QUESTIONS:
                     # Anchored to when "/start challenge_N" was actually sent
