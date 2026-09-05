@@ -941,52 +941,68 @@ async def main():
         # button shows up or the deadline passes. In test mode, test_bot.py
         # enforces the same activation-time gate, so this exercises the
         # exact same retry behavior as a real run, not a simulation of it.
-        start_command = f"/start challenge_{CHALLENGE_NUMBER}"
-        start_quiz_message, loc = await message_bot_with_retry_until_active(
-            client,
-            challenge_bot,
-            start_command,
-            START_QUIZ_TEXT_HINTS,
-            deadline,
-            RETRY_INTERVAL_SECONDS,
-            "Message bot / wait for Start Quiz",
-        )
-
-        # From here on, use a fresh deadline for the quiz-answering phase --
-        # it must not be truncated to whatever time was left on the Stage
-        # 1/2 gating deadline above (e.g. 17:05 UTC in real mode), since the
-        # quiz itself can legitimately run past that clock time once started.
-        quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
-
-        # IMPORTANT: some real bots (confirmed via debug logs on the live
-        # BirrForex bot) send Question 1 immediately after "/start", in the
-        # same burst as the welcome/"Start Quiz" message -- NOT gated on the
-        # "Start Quiz" button click. test_bot.py models the opposite (Q1 is
-        # only sent once the button callback is received), which is why
-        # test mode never exposed this. If we click first and only start
-        # listening for Q1 afterwards, a Q1 that already arrived before (or
-        # during) the click is missed entirely -- the listener starts too
-        # late to see it, and the run hangs until QUIZ_TIMEOUT_MINUTES.
         #
-        # Fix: start listening for the first post-welcome message from the
-        # bot BEFORE clicking, then click. Whichever happens to be true for
-        # this bot is covered -- a message already sitting there satisfies
-        # the wait immediately; a message that only shows up after the
-        # click still arrives at a listener that's already registered.
+        # IMPORTANT (confirmed on the live BirrForex bot via a user
+        # screenshot + debug logs on 2026-09-04): this bot sends Question 1
+        # immediately alongside the welcome/"Start Quiz" message -- both
+        # timestamped the same minute -- NOT gated on the "Start Quiz"
+        # button being clicked. test_bot.py models the opposite (Q1 is only
+        # sent once the button callback is received), which is why test
+        # mode never exposed this. If we only start listening for Q1 after
+        # finding/clicking the Start Quiz button, a Q1 that arrived earlier
+        # in the SAME retry loop that found that button is missed entirely
+        # -- the listener starts too late to see it, and the run hangs
+        # until QUIZ_TIMEOUT_MINUTES with nothing left to arrive.
+        #
+        # Fix: register a listener for "the first message that isn't a
+        # rejection and doesn't have a Start-Quiz-style button" BEFORE
+        # sending the very first "/start" at all -- not just before the
+        # click. That covers every timing this bot might use: Q1 sent in
+        # the same burst as the welcome message (covered because we're
+        # already listening before /start goes out), Q1 sent only after
+        # the click (still covered, arrives at an already-registered
+        # listener), or anything in between.
         first_question_fut = asyncio.get_event_loop().create_future()
 
         async def _first_question_handler(event):
-            # Ignore the "Start Quiz" welcome message itself -- Telethon
-            # identifies messages by (chat_id, id), so comparing ids is
-            # reliable even though both messages are in the same chat.
-            if event.message.id == start_quiz_message.id:
+            if first_question_fut.done():
                 return
-            if not first_question_fut.done():
-                first_question_fut.set_result(event)
+            msg = event.message
+            # Require this to actually look like a question message (has
+            # answer-option buttons), not just "isn't a rejection and isn't
+            # the Start-Quiz message." Rejections like "CHALLENGE CLOSED"
+            # for an earlier/expired challenge_N have no buttons at all
+            # (confirmed in a live debug log), so they're already excluded
+            # by requiring message.buttons -- but being explicit here also
+            # protects against a future bot reply that has buttons without
+            # being Q1 (e.g. a "join our channel" prompt).
+            if not msg.buttons:
+                return
+            if find_button_by_hints(msg, START_QUIZ_TEXT_HINTS) is not None:
+                return  # this is the welcome/"Start Quiz" message itself -- ignore
+            first_question_fut.set_result(event)
 
         client.add_event_handler(_first_question_handler, events.NewMessage(chats=challenge_bot))
 
         try:
+            start_command = f"/start challenge_{CHALLENGE_NUMBER}"
+            start_quiz_message, loc = await message_bot_with_retry_until_active(
+                client,
+                challenge_bot,
+                start_command,
+                START_QUIZ_TEXT_HINTS,
+                deadline,
+                RETRY_INTERVAL_SECONDS,
+                "Message bot / wait for Start Quiz",
+            )
+
+            # From here on, use a fresh deadline for the quiz-answering
+            # phase -- it must not be truncated to whatever time was left
+            # on the Stage 1/2 gating deadline above (e.g. 17:05 UTC in
+            # real mode), since the quiz itself can legitimately run past
+            # that clock time once started.
+            quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
+
             await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
             start_quiz_click_time = time.monotonic()
             log("Click Start Quiz", "OK", f"timer started")
