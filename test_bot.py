@@ -670,9 +670,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(text, reply_markup=markup)
         else:
             # Quiz done -- report score and how long it took start-to-finish.
-            # started_at is set when Q1 went out (START QUIZ tap), so this
-            # is exactly the answering window, not time spent on /start
-            # or reading the welcome message.
+            # started_at is set when Q1 was sent (right after /start, see
+            # start_command above), so this is the answering window from
+            # Q1's actual delivery, not time spent reading the welcome
+            # message or waiting on the (now-inert) Start Quiz tap.
             started_at = session.get("started_at")
             elapsed_seconds = time.monotonic() - started_at if started_at else None
             score = session["correct_count"]

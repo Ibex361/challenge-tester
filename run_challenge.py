@@ -18,6 +18,7 @@ Every stage logs clearly to stdout AND to the GitHub Actions job summary
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -256,12 +257,11 @@ def _load_section_notes() -> str:
 
 SECTION_NOTES_TEXT = _load_section_notes()
 
-# Temporary diagnostic switch: when true, logs EVERY incoming message across
-# every chat (not just the ones we're filtering for), so we can see exactly
-# what Telethon is receiving. Turn off once things are working reliably.
+# Temporary diagnostic switch: when true, logs every incoming message in
+# the challenge bot's chat (scoped via chats=challenge_bot -- see the
+# handler registration in main() for why it's scoped rather than global).
+# Turn off once things are working reliably.
 DEBUG_LOG_ALL_EVENTS = os.environ.get("DEBUG_LOG_ALL_EVENTS", "false").lower() == "true"
-
-
 
 
 # ----------------------------------------------------------------------
@@ -622,8 +622,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
         _log_groq_usage(resp, attempt_label)
         raw = (resp.choices[0].message.content or "").strip()
         try:
-            import json as _json
-            parsed = _json.loads(raw)
+            parsed = json.loads(raw)
             letter = str(parsed.get("answer", "")).strip().upper()
         except Exception:
             letter = ""
@@ -661,22 +660,6 @@ def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str
 # ----------------------------------------------------------------------
 # Telegram button helpers
 # ----------------------------------------------------------------------
-
-def describe_button(button) -> str:
-    """
-    Returns a short human-readable description of a Telethon Button's
-    underlying type (URL button, callback button, etc.) — useful for
-    diagnosing why a .click() didn't behave as expected.
-    """
-    # Telethon custom Button wraps a raw Telegram type in `.button`.
-    raw = getattr(button, "button", button)
-    type_name = type(raw).__name__
-    extra = ""
-    url = getattr(raw, "url", None)
-    if url:
-        extra = f" url={url}"
-    return f"{type_name}{extra}"
-
 
 def parse_telegram_deep_link(url: str):
     """
@@ -959,11 +942,13 @@ async def main():
         # enforces the same activation-time gate, so this exercises the
         # exact same retry behavior as a real run, not a simulation of it.
         #
-        # IMPORTANT (confirmed on the live BirrForex bot via a user
-        # screenshot + debug logs on 2026-09-04): this bot sends Question 1
-        # immediately alongside the welcome/"Start Quiz" message -- both
-        # timestamped the same minute -- NOT gated on the "Start Quiz"
-        # button being clicked. test_bot.py models the opposite (Q1 is only
+        # IMPORTANT (derived from live run_challenge.py debug logs on two
+        # separate accounts, 2026-09-04): the Welcome message and Question 1
+        # arrived 0-1 seconds apart in both runs -- both well before the
+        # script's own Start Quiz click completed (~15s later in both
+        # runs). That ordering means this bot does not wait for the
+        # "Start Quiz" button to be tapped before sending Q1 -- it sends
+        # both essentially together. test_bot.py models the opposite (Q1
         # sent once the button callback is received), which is why test
         # mode never exposed this. If we only start listening for Q1 after
         # finding/clicking the Start Quiz button, a Q1 that arrived earlier
