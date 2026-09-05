@@ -5,6 +5,13 @@ on:
   # schedule. Trigger it from the Actions tab whenever you want a report.
   workflow_dispatch:
     inputs:
+      account:
+        description: "Which Telegram testing account to read history from -- SAF uses secret SAF_TG_SESSION, ETH uses secret ETH_TG_SESSION (same accounts run-challenge.yml uses)."
+        type: choice
+        options:
+          - SAF
+          - ETH
+        default: SAF
       challenge_bot_username:
         description: "Challenge bot username (no @)"
         type: string
@@ -35,11 +42,36 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Resolve Telegram session for selected account
+        id: resolve_account
+        env:
+          SAF_TG_SESSION: ${{ secrets.SAF_TG_SESSION }}
+          ETH_TG_SESSION: ${{ secrets.ETH_TG_SESSION }}
+        run: |
+          # Mirrors run-challenge.yml's own account resolution -- this
+          # workflow used to reference a single TG_SESSION secret that no
+          # longer exists (replaced by the SAF/ETH pair when concurrent
+          # runs were added), which meant it failed immediately with an
+          # empty session if actually triggered. Fixed 2026-09-05.
+          account="${{ github.event.inputs.account || 'SAF' }}"
+          if [ "$account" == "SAF" ]; then
+            session="$SAF_TG_SESSION"
+          else
+            session="$ETH_TG_SESSION"
+          fi
+          if [ -z "$session" ]; then
+            echo "::error::Secret ${account}_TG_SESSION is empty or not set."
+            exit 1
+          fi
+          echo "::add-mask::$session"
+          echo "session=$session" >> "$GITHUB_OUTPUT"
+          echo "Using Telegram account: $account"
+
       - name: Inspect button types
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
-          TG_SESSION: ${{ secrets.TG_SESSION }}
+          TG_SESSION: ${{ steps.resolve_account.outputs.session }}
           CHALLENGE_BOT_USERNAME: ${{ github.event.inputs.challenge_bot_username }}
           ON_DATE: ${{ github.event.inputs.on_date }}
           HISTORY_HOURS: ${{ github.event.inputs.history_hours }}

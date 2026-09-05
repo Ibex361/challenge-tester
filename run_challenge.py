@@ -72,6 +72,12 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
     "START_QUIZ_TEXT_HINTS", "start quiz,start"
 ).split(",")
 
+# Positive-signal regex for recognizing an actual question message (used by
+# _first_question_handler in main()). Matches the confirmed real format,
+# e.g. "Question 1/5 \u23f1\ufe0f ...", "Question 2/5 ...". Configurable in
+# case the bot's wording ever changes; case-insensitive.
+QUESTION_TEXT_PATTERN = os.environ.get("QUESTION_TEXT_PATTERN", r"question\s+\d+\s*/\s*\d+")
+
 # Controls how the "Start Quiz" button click is handled -- NOT the per-answer
 # clicks later, which are always awaited normally (correctness there matters
 # too much to risk). This exists because message.click() on a callback
@@ -1044,18 +1050,24 @@ async def main():
             if first_question_fut.done():
                 return
             msg = event.message
-            # Require this to actually look like a question message (has
-            # answer-option buttons), not just "isn't a rejection and isn't
-            # the Start-Quiz message." Rejections like "CHALLENGE CLOSED"
-            # for an earlier/expired challenge_N have no buttons at all
-            # (confirmed in a live debug log), so they're already excluded
-            # by requiring message.buttons -- but being explicit here also
-            # protects against a future bot reply that has buttons without
-            # being Q1 (e.g. a "join our channel" prompt).
-            if not msg.buttons:
+            # Require this to actually look like a question message: real
+            # answer-option buttons (plural -- an MCQ has several) AND text
+            # matching QUESTION_TEXT_PATTERN, not just "has buttons and
+            # isn't the Start-Quiz message." The earlier, purely-negative
+            # version of this check would have latched onto ANY buttoned
+            # message that wasn't a rejection or the Welcome message as
+            # "Question 1" -- e.g. an unrelated announcement or a "join our
+            # channel" prompt landing in the same chat before Q1 actually
+            # arrives. Rejections like "CHALLENGE CLOSED" have no buttons
+            # at all (confirmed in a live debug log) so they were already
+            # excluded either way, but this is a meaningfully stricter,
+            # positive-signal match rather than relying on exclusion alone.
+            if not msg.buttons or len(extract_mcq_options(msg)) < 2:
                 return
             if find_button_by_hints(msg, START_QUIZ_TEXT_HINTS) is not None:
                 return  # this is the welcome/"Start Quiz" message itself -- ignore
+            if not re.search(QUESTION_TEXT_PATTERN, msg.text or "", re.IGNORECASE):
+                return
             first_question_fut.set_result(event)
 
         client.add_event_handler(_first_question_handler, events.NewMessage(chats=challenge_bot))
