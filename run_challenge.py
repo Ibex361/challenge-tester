@@ -745,19 +745,8 @@ async def click_button_or_follow_deep_link(client, message, row, col, stage_name
         return bot_entity
 
     # Not a URL button -> normal callback button, .click() is correct here.
-    # Time the call itself: message.click() performs Telegram's
-    # GetBotCallbackAnswer RPC, which Telegram forwards to the bot's own
-    # backend and waits for a response before returning to us -- so a slow
-    # click here reflects the BOT being slow/queued, not anything in this
-    # script. Logging the duration turns "why was there a mystery gap
-    # between these two log lines" into a number you can see directly
-    # (confirmed real: ~15s gaps seen on two separate accounts on
-    # 2026-09-04, with no flood-wait log line and no sleep() in this code
-    # path -- so the time was spent inside Telegram/the bot, not here).
-    click_started = time.monotonic()
     await message.click(row, col)
-    click_duration = time.monotonic() - click_started
-    log(stage_name, "OK", f"clicked callback button ({click_duration:.1f}s)")
+    log(stage_name, "OK", "clicked callback button")
     return None
 
 

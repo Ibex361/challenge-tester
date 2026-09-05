@@ -598,7 +598,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _sessions[chat_id] = {
         "questions": questions,
         "index": 0,
-        "started_at": None,  # set right below, when Q1 actually goes out
+        "started_at": None,  # set when START QUIZ is tapped and Q1 goes out
         "correct_count": 0,
     }
 
@@ -610,45 +610,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("START QUIZ", callback_data="start_quiz")]])
     await update.message.reply_text(welcome_text, reply_markup=keyboard)
 
-    # IMPORTANT (derived from live run_challenge.py debug logs on two
-    # separate accounts, 2026-09-04 -- see run_challenge.py's own comments
-    # for the timestamps): the Welcome message and Question 1 arrived
-    # 0-1 seconds apart in both runs, and BOTH arrived well before the
-    # script's Start Quiz click completed (~15s later in both runs). That
-    # ordering means the real bot does not wait for the "START QUIZ"
-    # button to be tapped before sending Q1 -- it sends both essentially
-    # together. This used to be modeled the opposite way here (Q1 only
-    # sent from button_handler on "start_quiz"), which meant this test bot
-    # could never exercise the real race condition that broke
-    # run_challenge.py in production: a run against this bot always had a
-    # Q1 listener registered in plenty of time, because Q1 literally
-    # couldn't exist yet at that point. Sending Q1 here, unconditionally,
-    # right after the welcome message, is what makes this test bot an
-    # actual regression test for that bug rather than a flow that happens
-    # to avoid it.
-    session = _sessions[chat_id]
-    session["started_at"] = time.monotonic()  # quiz clock starts as Q1 goes out
-    text, markup = build_question_message(0, session["questions"])
-    await update.message.reply_text(text, reply_markup=markup)
-
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     chat_id = query.message.chat_id
-    await query.answer()  # acknowledge the tap immediately, no artificial delay
+    await query.answer()  # acknowledge the tap, same as a real bot would
 
     data = query.data
     log.info(f"Button pressed in chat {chat_id}: {data}")
 
     if data == "start_quiz":
-        # Inert by design -- see start_command above. Q1 was already sent
-        # unconditionally when /start was handled, before this tap could
-        # even happen (the logs show Q1 arriving ~15s before the click
-        # completed), so there's nothing left for this tap to trigger.
-        # We don't have direct log evidence of what the real bot does on
-        # this click server-side (only that no separate Q1 message
-        # followed it) -- returning here without sending anything is the
-        # closest match to what was actually observed.
+        session = _sessions.get(chat_id)
+        if not session:
+            await query.message.reply_text("Session expired -- send /start again.")
+            return
+        session["started_at"] = time.monotonic()  # quiz clock starts as Q1 goes out
+        text, markup = build_question_message(0, session["questions"])
+        await query.message.reply_text(text, reply_markup=markup)
         return
 
     if data.startswith("answer:"):
