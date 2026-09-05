@@ -8,7 +8,10 @@ Flow:
   4. For each of 5 questions: read question + options, ask Gemini which
      option is correct, click that option's button.
   5. Question 5's click is gated so it never lands sooner than
-     MIN_SECONDS_SINCE_START_QUIZ seconds after the "Start Quiz" click.
+     MIN_SECONDS_SINCE_START_QUIZ seconds after "/start challenge_N" was
+     sent (the send that got a real response, not an earlier rejected
+     attempt) -- not after the "Start Quiz" click, since the bot's own
+     quiz timer appears to start from message delivery, not that click.
 
 Every stage logs clearly to stdout AND to the GitHub Actions job summary
 (if running in Actions), so a failure is easy to locate.
@@ -822,7 +825,9 @@ async def message_bot_with_retry_until_active(
     either a message with a matching button (`hints`) arrives, or
     `deadline_dt` passes.
 
-    Returns (message, (row, col)) for the matched button.
+    Returns (message, (row, col), sent_at) for the matched button, where
+    sent_at is the time.monotonic() timestamp of the specific "/start" send
+    that led to this response (i.e. not an earlier rejected attempt).
     """
     result_fut = asyncio.get_event_loop().create_future()
 
@@ -850,6 +855,7 @@ async def message_bot_with_retry_until_active(
                 log(stage_name, "TIMEOUT", f"no matching message before deadline ({deadline_dt.isoformat()})")
                 raise StageFailure(stage_name, "timed out waiting for a message with the expected button")
 
+            sent_at = time.monotonic()
             await client.send_message(challenge_bot, start_command)
             log(stage_name, "INFO", f"sent '{start_command}' (attempt {attempt})")
 
@@ -857,7 +863,7 @@ async def message_bot_with_retry_until_active(
             try:
                 msg, loc = await asyncio.wait_for(asyncio.shield(result_fut), timeout=wait_for)
                 log(stage_name, "OK", f"found matching button at row {loc[0]}, col {loc[1]} (attempt {attempt})")
-                return msg, loc
+                return msg, loc, sent_at
             except asyncio.TimeoutError:
                 attempt += 1
                 continue
@@ -986,7 +992,7 @@ async def main():
 
         try:
             start_command = f"/start challenge_{CHALLENGE_NUMBER}"
-            start_quiz_message, loc = await message_bot_with_retry_until_active(
+            start_quiz_message, loc, quiz_started_at = await message_bot_with_retry_until_active(
                 client,
                 challenge_bot,
                 start_command,
@@ -1004,7 +1010,6 @@ async def main():
             quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
 
             await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz")
-            start_quiz_click_time = time.monotonic()
             log("Click Start Quiz", "OK", f"timer started")
 
             # ---- Stage 3: answer each question ----
@@ -1056,7 +1061,13 @@ async def main():
                 log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
 
                 if q_num == TOTAL_QUESTIONS:
-                    elapsed = time.monotonic() - start_quiz_click_time
+                    # Anchored to when "/start challenge_N" was actually sent
+                    # (the specific send that got a real response, not an
+                    # earlier "not active yet" attempt), not to the Start
+                    # Quiz click -- the real bot's own quiz timer appears to
+                    # start from message delivery, not from that click (see
+                    # 2026-09-04 findings), so this is the safer anchor.
+                    elapsed = time.monotonic() - quiz_started_at
                     if elapsed < MIN_SECONDS_SINCE_START_QUIZ:
                         wait_for = MIN_SECONDS_SINCE_START_QUIZ - elapsed
                         log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before final click")
