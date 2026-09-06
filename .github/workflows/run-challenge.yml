@@ -267,7 +267,14 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ steps.resolve_account.outputs.session }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # 3 separate Groq accounts (separate orgs/ITPM quotas), round-
+          # robin'd across the 5 questions by run_challenge.py so no
+          # single account's rate limit is hit by rapid-fire calls that
+          # each carry the full SECTION_NOTES block. Replaces the old
+          # single GROQ_API_KEY secret.
+          GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+          GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
           AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
           TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.tester_utc_time }}

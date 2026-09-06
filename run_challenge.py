@@ -44,7 +44,21 @@ API_ID = int(os.environ["TG_API_ID"])
 API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")  # only required if AI_PROVIDER=groq
+
+# Three separate Groq accounts (separate orgs -> separate ITPM quotas),
+# used round-robin across the quiz's questions so no single account's
+# rate limit is hit by 5 rapid-fire calls each carrying the full
+# SECTION_NOTES block (~2000+ input tokens/call). Replaces the old
+# single GROQ_API_KEY -- only required if AI_PROVIDER=groq.
+GROQ_API_KEYS = [
+    (name, key)
+    for name, key in (
+        ("GROQ_API_KEY_1", os.environ.get("GROQ_API_KEY_1")),
+        ("GROQ_API_KEY_2", os.environ.get("GROQ_API_KEY_2")),
+        ("GROQ_API_KEY_3", os.environ.get("GROQ_API_KEY_3")),
+    )
+    if key
+]
 
 # Which AI answers the quiz questions. "groq" is the fast path (Groq's LPU
 # hardware gives far more consistent low latency than Gemini has shown in
@@ -52,8 +66,8 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")  # only required if AI_PROVIDER=gr
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq").lower()
 if AI_PROVIDER not in ("groq", "gemini"):
     raise SystemExit(f"AI_PROVIDER must be 'groq' or 'gemini', got {AI_PROVIDER!r}")
-if AI_PROVIDER == "groq" and not GROQ_API_KEY:
-    raise SystemExit("AI_PROVIDER=groq requires GROQ_API_KEY to be set.")
+if AI_PROVIDER == "groq" and not GROQ_API_KEYS:
+    raise SystemExit("AI_PROVIDER=groq requires at least one of GROQ_API_KEY_1/2/3 to be set.")
 
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 
@@ -431,7 +445,12 @@ def today_utc_at(hh_mm_or_hhmmss: str) -> datetime:
 # ----------------------------------------------------------------------
 
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-_groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+# One Groq client per configured key, built once at import time (a Groq
+# client is just a thin HTTP wrapper around an API key -- no connection
+# or handshake happens here, so holding several is free). Indexed
+# round-robin by question number in ask_groq_for_answer.
+_groq_clients = [(name, Groq(api_key=key)) for name, key in GROQ_API_KEYS]
 
 _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in case
 
@@ -685,12 +704,23 @@ def _log_groq_usage(resp, attempt_label: str) -> None:
     log(f"Groq answer ({attempt_label})", "INFO", f"token usage -- {', '.join(parts)}")
 
 
-def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
+def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
     """
     Groq equivalent of ask_gemini_for_answer(). Same shape, same return
     value (a single option letter), so the call site doesn't need to know
     which provider is in use.
+
+    q_num (1-based question number) picks which of the configured Groq
+    accounts handles this call, round-robin (q_num - 1) % len(_groq_clients)
+    -- spreads the ~2000+ input tokens/call (SECTION_NOTES attached in
+    full each time) across separate accounts/ITPM quotas so consecutive
+    questions never stack against the same account's rate limit. Logging
+    which key answered is just a print() (see log()) -- no extra network
+    call, so this adds no latency.
     """
+    key_name, groq_client = _groq_clients[(q_num - 1) % len(_groq_clients)]
+    log(f"Groq answer ({attempt_label})", "INFO", f"using {key_name}")
+
     valid_letters = _LETTERS[: len(options)]
     prompt = _build_prompt(question_text, options)
 
@@ -742,7 +772,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
             groq_kwargs["reasoning_effort"] = GROQ_REASONING_EFFORT
         for attempt in range(1, max_attempts + 1):
             try:
-                return _groq_client.chat.completions.create(**groq_kwargs)
+                return groq_client.chat.completions.create(**groq_kwargs)
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts:
@@ -790,10 +820,12 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     )
 
 
-def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
-    """Dispatches to whichever provider AI_PROVIDER selects."""
+def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
+    """Dispatches to whichever provider AI_PROVIDER selects. q_num (1-based)
+    is only used by Groq, to round-robin across the configured accounts --
+    see ask_groq_for_answer."""
     if AI_PROVIDER == "groq":
-        return ask_groq_for_answer(question_text, options, attempt_label)
+        return ask_groq_for_answer(question_text, options, attempt_label, q_num)
     return ask_gemini_for_answer(question_text, options, attempt_label)
 
 
@@ -1239,7 +1271,7 @@ async def main():
                 # until the call returns, which is what caused the apparent
                 # "stall" on Question 4.
                 answer_letter = await asyncio.to_thread(
-                    ask_ai_for_answer, question_text, options, stage
+                    ask_ai_for_answer, question_text, options, stage, q_num
                 )
                 answer_index = _LETTERS.index(answer_letter)
                 if bare_letters:
