@@ -191,12 +191,15 @@ if TEST_MODE and not OPEN_TIME_UTC:
 QUIZ_TIMEOUT_MINUTES = float(os.environ.get("QUIZ_TIMEOUT_MINUTES", "15"))
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
-# openai/gpt-oss-20b is Groq's fastest current production model (~1000
-# tokens/sec) that also supports strict JSON Schema output -- see
-# https://console.groq.com/docs/model/openai/gpt-oss-20b. Groq deprecated
-# llama-3.1-8b-instant (the previous fast/cheap option) on free and
-# developer tiers in August 2026; this is its recommended replacement.
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+# qwen/qwen3.6-27b is the default Groq model (switched from openai/gpt-oss-20b
+# on 2026-09-06) -- higher benchmarked intelligence (see decisions in
+# context.json), with its known ITPM rate-limit exposure addressed by the
+# 3-key round-robin (GROQ_API_KEY_1/2/3) rather than by picking a smaller
+# model. gpt-oss-20b remains available via GROQ_MODEL override; it was
+# Groq's recommended replacement for llama-3.1-8b-instant (deprecated
+# August 2026) and is still the faster/cheaper option if that's ever
+# preferred over accuracy again.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b")
 
 
 def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str):
