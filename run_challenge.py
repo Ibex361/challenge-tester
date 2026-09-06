@@ -7,11 +7,10 @@ Flow:
   3. Wait for a "Start Quiz" style button from the challenge bot, click it.
   4. For each of 5 questions: read question + options, ask Gemini which
      option is correct, click that option's button.
-  5. Question 5's click is gated so it never lands sooner than
-     MIN_SECONDS_SINCE_START_QUIZ seconds after "/start challenge_N" was
-     sent (the send that got a real response, not an earlier rejected
-     attempt) -- not after the "Start Quiz" click, since the bot's own
-     quiz timer appears to start from message delivery, not that click.
+  5. Each question's click is paced: it never lands sooner than that
+     question's configured floor (control/pacing.json) after the
+     question's message was received, so no question gets answered
+     near-instantly.
 
 Every stage logs clearly to stdout AND to the GitHub Actions job summary
 (if running in Actions), so a failure is easy to locate.
@@ -139,7 +138,6 @@ START_QUIZ_CLICK_MODE = _parse_click_mode("START_QUIZ_CLICK_MODE")
 ANSWER_CLICK_MODE = _parse_click_mode("ANSWER_CLICK_MODE")
 
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
-MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "15"))
 
 # ---- Stage 1 timing ----
 # The bot rejects /start before it opens, replying with the exact text in
@@ -333,6 +331,65 @@ def _load_section_notes() -> str:
 
 
 SECTION_NOTES_TEXT = _load_section_notes()
+
+
+# Per-question pacing floor: each question's answer click is held back
+# until at least N seconds have passed since that question's message was
+# received, so the run doesn't look like every question got answered
+# near-instantly (a distinctive, bot-like pattern) with pacing only
+# applied to the final click, as before. Replaces the old
+# MIN_SECONDS_SINCE_START_QUIZ (single floor gating only Question 5's
+# click, anchored to /start challenge_N being sent).
+#
+# Lives in control/pacing.json (not an env var) so it's editable straight
+# from GitHub's web UI without touching the workflow or any secrets.
+# Shape:
+#   {"default": 3, "1": 2, "2": 2, "3": 2.5, "4": 3, "5": 3}
+# "default" (required) is the floor for any question number not given
+# its own key. A flat {"default": 3} with no other keys is valid too --
+# every question then uses the same 3s floor.
+PACING_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "control", "pacing.json")
+
+
+def _load_pacing_config() -> dict:
+    """
+    Reads control/pacing.json and returns {question_number: seconds}
+    resolved for every question in 1..TOTAL_QUESTIONS (falling back to
+    "default" for any question not explicitly listed).
+
+    Unlike section notes, pacing is a deliberate anti-detection measure,
+    not an optional enhancement -- a missing or malformed file fails the
+    run loudly (SystemExit) rather than silently pacing at 0s, which
+    would defeat the purpose without anyone noticing.
+    """
+    try:
+        with open(PACING_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        raise SystemExit(f"control/pacing.json not found at {PACING_CONFIG_PATH} -- required for per-question pacing.")
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"control/pacing.json is not valid JSON: {e}")
+
+    if not isinstance(raw, dict) or "default" not in raw:
+        raise SystemExit('control/pacing.json must be a JSON object with a "default" key, e.g. {"default": 3}.')
+
+    def _as_seconds(value, key):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise SystemExit(f"control/pacing.json: value for {key!r} must be a number, got {value!r}.")
+
+    default_seconds = _as_seconds(raw["default"], "default")
+    resolved = {}
+    for q in range(1, TOTAL_QUESTIONS + 1):
+        key = str(q)
+        resolved[q] = _as_seconds(raw[key], key) if key in raw else default_seconds
+
+    print(f"[pacing] Loaded {PACING_CONFIG_PATH}: {resolved}")
+    return resolved
+
+
+PACING_SECONDS_BY_QUESTION = _load_pacing_config()
 
 # Temporary diagnostic switch: when true, logs every incoming message in
 # the challenge bot's chat (scoped via chats=challenge_bot -- see the
@@ -1206,7 +1263,7 @@ async def main():
 
         try:
             start_command = f"/start challenge_{CHALLENGE_NUMBER}"
-            start_quiz_message, loc, quiz_started_at = await message_bot_with_retry_until_active(
+            start_quiz_message, loc, _quiz_started_at = await message_bot_with_retry_until_active(
                 client,
                 challenge_bot,
                 start_command,
@@ -1253,6 +1310,7 @@ async def main():
                         f"{stage}: wait for question",
                     )
                 q_message: Message = q_event.message
+                question_received_at = time.monotonic()
 
                 options = extract_mcq_options(q_message)
                 if not options:
@@ -1284,18 +1342,21 @@ async def main():
                     answer_text = _strip_redundant_letter_prefix(options[answer_index], answer_letter) if answer_index < len(options) else "?"
                     log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
 
-                if q_num == TOTAL_QUESTIONS:
-                    # Anchored to when "/start challenge_N" was actually sent
-                    # (the specific send that got a real response, not an
-                    # earlier "not active yet" attempt), not to the Start
-                    # Quiz click -- the real bot's own quiz timer appears to
-                    # start from message delivery, not from that click (see
-                    # 2026-09-04 findings), so this is the safer anchor.
-                    elapsed = time.monotonic() - quiz_started_at
-                    if elapsed < MIN_SECONDS_SINCE_START_QUIZ:
-                        wait_for = MIN_SECONDS_SINCE_START_QUIZ - elapsed
-                        log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before final click")
-                        await asyncio.sleep(wait_for)
+                # Per-question pacing floor (control/pacing.json): hold the
+                # click back until at least this question's configured
+                # number of seconds have passed since its message arrived.
+                # Anchored to message receipt (not e.g. Groq's response
+                # time) so a slow Groq call -- including a rate-limit
+                # backoff -- already counts toward the floor; the sleep
+                # below only fires when Groq answered faster than the
+                # floor allows. Applies to every question now, not just
+                # the last one (see 2026-09-06 decision in context.json).
+                elapsed = time.monotonic() - question_received_at
+                floor = PACING_SECONDS_BY_QUESTION[q_num]
+                if elapsed < floor:
+                    wait_for = floor - elapsed
+                    log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before click")
+                    await asyncio.sleep(wait_for)
 
                 # Buttons were flattened row-by-row in extract_mcq_options; map
                 # the flat index back to (row, col) for the click.
