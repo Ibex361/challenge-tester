@@ -435,6 +435,62 @@ QUIZ_6_RISK_ORDERS = [
     },
 ]
 
+# -- Real challenge_35 questions (2026-09-04), verbatim from user screenshots
+# -- used throughout this session's Q1-race-condition / click-mode
+# investigation. Correct answers confirmed by the user against the bot's
+# own "CORRECT ANSWERS" summary message, not guessed -- see context.json.
+# Q1 and Q4 use the real bot's bare-letter button style (confirmed via
+# inspect_bot_buttons.py, 2026-09-04); Q2/Q3/Q5 use its full-option-text
+# style -- matches the real challenge exactly, not a simplified version.
+# NAMING (per user, 2026-09-06): "quizN" is reserved for synthetic quizzes
+# NOT sourced from a live challenge; anything taken from a real live bot
+# run gets a descriptive name instead -- this one is SECTION_6_QUIZ /
+# "section_6_quiz", not "quiz7".
+SECTION_6_QUIZ = [
+    {
+        "text": (
+            "In which account type can you trade less than 1,000 units of a currency?\n"
+            "A) Pro Account\n"
+            "B) You cannot trade less than 1,000 units\n"
+            "C) Standard Account\n"
+            "D) Micro Account"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+    },
+    {
+        "text": "Which order type was specified in the section video as the newer order type usefull in placing order for Volatile Asset?",
+        "options": ["Stop", "Limit", "Trailing", "Stop limit"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+    {
+        "text": "Which instruments were given as examples of \u201codd pairs\u201d where the standard currency contract-sizing rule does not apply?",
+        "options": ["Gold, BTC, US500", "XAG, Oil, US30", "XAU, Oil, BTC", "USTEC, Gold, Oil"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "What is the common contract size for BTCUSD?\n"
+            "A) 1 BTC\n"
+            "B) 10 BTC\n"
+            "C) 1,000 BTC\n"
+            "D) 100,000 BTC"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+    {
+        "text": "Which lot size represents 10,000 units in Forex?",
+        "options": ["1 Lot", "0.1 Lot", "Micro Lot", "Standard Lot"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
@@ -444,13 +500,15 @@ QUIZ_SESSIONS = {
     "quiz4": QUIZ_4_POSITION_SIZING,
     "quiz5": QUIZ_5_ORDER_TYPES,
     "quiz6": QUIZ_6_RISK_ORDERS,
+    "section_6_quiz": SECTION_6_QUIZ,
 }
 
 TOTAL_QUESTIONS = 5
 LETTERS = ["A", "B", "C", "D", "E", "F"]
 
-# Which quiz session to run: "quiz1", "quiz2", "quiz3", or "random" to
-# pick one of the 3 at random each session. Replaces the old
+# Which quiz session to run: any key in QUIZ_SESSIONS (currently
+# quiz1-quiz6 plus section_6_quiz -- see NAMING note above SECTION_6_QUIZ),
+# or "random" to pick one at random each session. Replaces the old
 # TEST_INCLUDE_VIDEO_QUESTIONS boolean -- selecting quiz2 naturally
 # includes its 2 video-reference questions since they're part of that
 # real quiz, no separate toggle needed. Defaults to "random" so ordinary
