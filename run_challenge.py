@@ -341,26 +341,41 @@ SECTION_NOTES_TEXT = _load_section_notes()
 # MIN_SECONDS_SINCE_START_QUIZ (single floor gating only Question 5's
 # click, anchored to /start challenge_N being sent).
 #
+# Also holds max_quiz_seconds: a ceiling on total time since the Start
+# Quiz button was clicked (not since the bot responded to that click --
+# in fire_and_forget mode there may be no prompt response to anchor to,
+# and even in "await" mode the response time is itself variable, so the
+# click is the only stable, deterministic anchor). Each question's
+# pacing wait is capped so it never pushes total elapsed past this
+# ceiling -- e.g. if 28s have passed and a question's own floor would
+# reach 33s, it only waits 2s (to reach 30s), not the full floor.
+#
 # Lives in control/pacing.json (not an env var) so it's editable straight
 # from GitHub's web UI without touching the workflow or any secrets.
 # Shape:
-#   {"default": 3, "1": 2, "2": 2, "3": 2.5, "4": 3, "5": 3}
-# "default" (required) is the floor for any question number not given
-# its own key. A flat {"default": 3} with no other keys is valid too --
-# every question then uses the same 3s floor.
+#   {"default": 3, "1": 2, "2": 2, "3": 2.5, "4": 3, "5": 3, "max_quiz_seconds": 30}
+# "default" and "max_quiz_seconds" are both required. "default" is the
+# floor for any question number not given its own key. A minimal
+# {"default": 3, "max_quiz_seconds": 30} with no per-question keys is
+# valid too -- every question then uses the same 3s floor, capped at 30s
+# total.
 PACING_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "control", "pacing.json")
 
 
-def _load_pacing_config() -> dict:
+def _load_pacing_config() -> tuple[dict, float]:
     """
-    Reads control/pacing.json and returns {question_number: seconds}
-    resolved for every question in 1..TOTAL_QUESTIONS (falling back to
-    "default" for any question not explicitly listed).
+    Reads control/pacing.json and returns (per_question, max_quiz_seconds):
+      - per_question: {question_number: seconds} resolved for every
+        question in 1..TOTAL_QUESTIONS (falling back to "default" for any
+        question not explicitly listed).
+      - max_quiz_seconds: the total-elapsed-since-Start-Quiz-click ceiling
+        that per-question waits get capped against.
 
     Unlike section notes, pacing is a deliberate anti-detection measure,
-    not an optional enhancement -- a missing or malformed file fails the
-    run loudly (SystemExit) rather than silently pacing at 0s, which
-    would defeat the purpose without anyone noticing.
+    not an optional enhancement -- a missing or malformed file, or a
+    missing required key, fails the run loudly (SystemExit) rather than
+    silently pacing at 0s, which would defeat the purpose without anyone
+    noticing.
     """
     try:
         with open(PACING_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -370,8 +385,11 @@ def _load_pacing_config() -> dict:
     except json.JSONDecodeError as e:
         raise SystemExit(f"control/pacing.json is not valid JSON: {e}")
 
-    if not isinstance(raw, dict) or "default" not in raw:
-        raise SystemExit('control/pacing.json must be a JSON object with a "default" key, e.g. {"default": 3}.')
+    if not isinstance(raw, dict) or "default" not in raw or "max_quiz_seconds" not in raw:
+        raise SystemExit(
+            'control/pacing.json must be a JSON object with "default" and "max_quiz_seconds" keys, '
+            'e.g. {"default": 3, "max_quiz_seconds": 30}.'
+        )
 
     def _as_seconds(value, key):
         try:
@@ -380,16 +398,17 @@ def _load_pacing_config() -> dict:
             raise SystemExit(f"control/pacing.json: value for {key!r} must be a number, got {value!r}.")
 
     default_seconds = _as_seconds(raw["default"], "default")
-    resolved = {}
+    max_quiz_seconds = _as_seconds(raw["max_quiz_seconds"], "max_quiz_seconds")
+    per_question = {}
     for q in range(1, TOTAL_QUESTIONS + 1):
         key = str(q)
-        resolved[q] = _as_seconds(raw[key], key) if key in raw else default_seconds
+        per_question[q] = _as_seconds(raw[key], key) if key in raw else default_seconds
 
-    print(f"[pacing] Loaded {PACING_CONFIG_PATH}: {resolved}")
-    return resolved
+    print(f"[pacing] Loaded {PACING_CONFIG_PATH}: per_question={per_question}, max_quiz_seconds={max_quiz_seconds}")
+    return per_question, max_quiz_seconds
 
 
-PACING_SECONDS_BY_QUESTION = _load_pacing_config()
+PACING_SECONDS_BY_QUESTION, MAX_QUIZ_SECONDS = _load_pacing_config()
 
 # Temporary diagnostic switch: when true, logs every incoming message in
 # the challenge bot's chat (scoped via chats=challenge_bot -- see the
@@ -1281,6 +1300,13 @@ async def main():
             quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
 
             await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz", click_mode=START_QUIZ_CLICK_MODE)
+            # Anchor for MAX_QUIZ_SECONDS (control/pacing.json): taken right
+            # at the click itself, not any response to it -- in
+            # fire_and_forget mode there may be no prompt response to
+            # anchor to at all, and even in "await" mode the response time
+            # is itself variable, so the click is the only stable,
+            # deterministic "quiz start" moment.
+            quiz_click_at = time.monotonic()
             log("Click Start Quiz", "OK", f"timer started")
 
             # ---- Stage 3: answer each question ----
@@ -1351,12 +1377,23 @@ async def main():
                 # below only fires when Groq answered faster than the
                 # floor allows. Applies to every question now, not just
                 # the last one (see 2026-09-06 decision in context.json).
-                elapsed = time.monotonic() - question_received_at
+                #
+                # Capped by MAX_QUIZ_SECONDS: the wait is trimmed (never
+                # extended) so total time since the Start Quiz click never
+                # exceeds that ceiling -- e.g. if 28s have passed and this
+                # question's floor would reach 33s, it only waits 2s (to
+                # reach 30s), not the full floor. If the ceiling has
+                # already been reached, this question isn't paced at all.
+                elapsed_since_question = time.monotonic() - question_received_at
                 floor = PACING_SECONDS_BY_QUESTION[q_num]
-                if elapsed < floor:
-                    wait_for = floor - elapsed
+                elapsed_since_quiz_start = time.monotonic() - quiz_click_at
+                remaining_quiz_budget = MAX_QUIZ_SECONDS - elapsed_since_quiz_start
+                wait_for = min(floor - elapsed_since_question, remaining_quiz_budget)
+                if wait_for > 0:
                     log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before click")
                     await asyncio.sleep(wait_for)
+                elif elapsed_since_question < floor:
+                    log(stage, "INFO", f"pacing: skipping wait -- MAX_QUIZ_SECONDS ({MAX_QUIZ_SECONDS:.0f}s) already reached")
 
                 # Buttons were flattened row-by-row in extract_mcq_options; map
                 # the flat index back to (row, col) for the click.
