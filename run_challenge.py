@@ -172,6 +172,16 @@ TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 # for, and 5 minutes of retrying after open time is enough to absorb the
 # bot being a beat late to actually activate.
 CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
+# The bot's reply once a challenge has ended, e.g. "This challenge ended at
+# 2:10 PM." -- unlike CHALLENGE_NOT_ACTIVE_TEXT, retrying can NEVER help
+# here (the challenge is over, not merely "not yet"), so this must fail
+# the run immediately on first sighting rather than retry it like the
+# not-yet-active case. Matched as a substring since the exact closing
+# time varies. Added 2026-09-06 after a real run kept retrying against a
+# closed challenge every retry_interval_seconds until Telegram's own
+# per-account send-rate limit kicked in (FloodWaitError, "A wait of 3335
+# seconds is required" -- an unhandled crash, not a clean stop).
+CHALLENGE_CLOSED_TEXT = "This challenge ended at"
 CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00:01")       # HH:MM[:SS], UTC -- real mode, secret-controlled only (see comment above)
 TEST_ACTIVATION_TIME_UTC = os.environ.get("TEST_ACTIVATION_TIME_UTC")                # HH:MM, UTC -- test mode
 EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "15"))
@@ -1126,7 +1136,10 @@ async def message_bot_with_retry_until_active(
             return
         text = (msg.text or "").strip()
         preview = text.replace("\n", " ")[:60]
-        if CHALLENGE_NOT_ACTIVE_TEXT in text:
+        if CHALLENGE_CLOSED_TEXT in text:
+            log(stage_name, "INFO", f"bot reports the challenge has closed (preview: '{preview}') -- stopping, retrying can't help")
+            result_fut.set_exception(StageFailure(stage_name, f"challenge is closed: '{preview}'"))
+        elif CHALLENGE_NOT_ACTIVE_TEXT in text:
             log(stage_name, "INFO", "bot reports the challenge is not active yet -- will retry")
         else:
             log(stage_name, "INFO", f"message received without matching button, still waiting (preview: '{preview}')")
