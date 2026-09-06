@@ -55,7 +55,15 @@ on:
         type: boolean
         default: false
       start_quiz_click_mode:
-        description: "How to handle the Start Quiz button click. 'await' (safest/current default) waits for the bot's response before proceeding. 'fire_and_forget' sends the click but proceeds immediately without waiting -- Question 1 has been confirmed to arrive independent of this click, so the ~15s the bot's backend can take to answer it (seen under real 17:00 UTC load) may be dead weight. 'skip' doesn't click at all. fire_and_forget/skip are UNTESTED against the real bot -- use for live A/B comparisons, not as a silent default."
+        description: "Start Quiz button click: await (safe default), fire_and_forget (don't wait for bot's response), or skip (don't click). See START_QUIZ_CLICK_MODE in run_challenge.py for why."
+        type: choice
+        options:
+          - await
+          - fire_and_forget
+          - skip
+        default: await
+      answer_click_mode:
+        description: "Same choice, for the 5 answer-option clicks. Untested against the real bot -- await stays the safe default. See ANSWER_CLICK_MODE in run_challenge.py."
         type: choice
         options:
           - await
@@ -277,6 +285,7 @@ jobs:
           MIN_SECONDS_SINCE_START_QUIZ: "15"
           DEBUG_LOG_ALL_EVENTS: ${{ github.event.inputs.debug_log_all_events || 'false' }}
           START_QUIZ_CLICK_MODE: ${{ github.event.inputs.start_quiz_click_mode || 'await' }}
+          ANSWER_CLICK_MODE: ${{ github.event.inputs.answer_click_mode || 'await' }}
           THINKING_LEVEL: ${{ github.event.inputs.thinking_level || 'low' }}
           PROMPT_EXTRA_INSTRUCTION: ${{ github.event.inputs.prompt_extra_instruction }}
           SECTION_NOTES: ${{ github.event.inputs.section_notes }}

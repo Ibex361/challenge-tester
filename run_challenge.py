@@ -78,39 +78,51 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 # case the bot's wording ever changes; case-insensitive.
 QUESTION_TEXT_PATTERN = os.environ.get("QUESTION_TEXT_PATTERN", r"question\s+\d+\s*/\s*\d+")
 
-# Controls how the "Start Quiz" button click is handled -- NOT the per-answer
-# clicks later, which are always awaited normally (correctness there matters
-# too much to risk). This exists because message.click() on a callback
-# button awaits Telegram's GetBotCallbackAnswerRequest, which blocks until
-# the BOT's own backend responds -- confirmed on two separate live accounts
-# (2026-09-04) to take ~15s under real 17:00 UTC load, most likely the bot's
-# backend queuing ~300 near-simultaneous callback queries. Since Question 1
-# has also been confirmed to arrive independent of this click (see
-# _first_question_handler in main()), that ~15s wait may be pure dead
-# weight sitting in the critical path of a fastest-submission-wins quiz.
-# Three modes, chosen via the START_QUIZ_CLICK_MODE workflow input, so this
-# can be safely A/B tested across a few live runs before committing to one:
+def _parse_click_mode(env_name: str, default: str = "await") -> str:
+    """Shared validation for START_QUIZ_CLICK_MODE / ANSWER_CLICK_MODE."""
+    value = os.environ.get(env_name, default).strip().lower()
+    if value not in ("await", "fire_and_forget", "skip"):
+        print(f"::error::{env_name} must be 'await', 'fire_and_forget', or 'skip' (got '{value}')", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+# Controls how the "Start Quiz" button click is handled. This exists
+# because message.click() on a callback button awaits Telegram's
+# GetBotCallbackAnswerRequest, which blocks until the BOT answers -- or
+# until Telegram's OWN server-side grace period elapses and it gives up,
+# raising BotResponseTimeoutError (which Telethon silently swallows,
+# returning None). CONFIRMED 2026-09-05 via a live controlled test: clicking
+# an old Start Quiz button while the bot process was entirely offline still
+# produced the exact same ~15s wait as a real run -- there was nothing on
+# the other end to respond, so this can only be Telegram's own timeout
+# ceiling, not real bot processing time. Most likely explanation: once Q1
+# has already been sent, the bot doesn't answer that callback at all (same
+# as it doesn't for a stale/expired Start Quiz button), so every real
+# Start-Quiz click may just be waiting out that fixed ~15s ceiling for
+# nothing -- confirmed harmless to skip, since Q1 arrives independent of
+# this click either way (see _first_question_handler in main()).
 #   "await"           (default/current behavior) -- click and wait for
 #                      Telegram's confirmation before proceeding. Safest;
 #                      guaranteed not to change behavior if the click turns
 #                      out to matter after all.
 #   "fire_and_forget"  -- send the click but don't wait for the bot's
 #                      response; proceed to waiting for Q1 immediately.
-#                      Risky ONLY if the bot's callback response is what
-#                      actually flips some server-side "quiz started" state
-#                      needed before it'll accept an answer -- untested
-#                      against the real bot, hence being an option rather
-#                      than the new default.
-#   "skip"             -- don't click at all. Only safe if the button is
-#                      truly decorative once Q1 has already been sent
-#                      (matches what we've observed so far: no second
-#                      message or other effect was ever seen following this
-#                      click in a live run) -- again, untested as a
-#                      guarantee, hence opt-in.
-START_QUIZ_CLICK_MODE = os.environ.get("START_QUIZ_CLICK_MODE", "await").strip().lower()
-if START_QUIZ_CLICK_MODE not in ("await", "fire_and_forget", "skip"):
-    print(f"::error::START_QUIZ_CLICK_MODE must be 'await', 'fire_and_forget', or 'skip' (got '{START_QUIZ_CLICK_MODE}')", file=sys.stderr)
-    sys.exit(1)
+#   "skip"             -- don't click at all.
+START_QUIZ_CLICK_MODE = _parse_click_mode("START_QUIZ_CLICK_MODE")
+
+# Same idea, applied to the 5 per-answer clicks instead. Different risk
+# profile from Start Quiz: the thing that actually matters for correctness
+# here isn't the click's own Telegram-level acknowledgment (confirmed:
+# irrelevant -- if the bot sends the NEXT question, the answer registered,
+# full stop, regardless of whether GetBotCallbackAnswerRequest ever
+# resolved) -- it's whether the bot's answer-processing/quiz-advancing
+# logic depends on that acknowledgment completing server-side, which is
+# untested and may differ from Start Quiz's (confirmed) behavior. "await"
+# stays the default for that reason; fire_and_forget/skip exist for live
+# A/B testing, not as a safe assumption carried over from the Start Quiz
+# finding.
+ANSWER_CLICK_MODE = _parse_click_mode("ANSWER_CLICK_MODE")
 
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 MIN_SECONDS_SINCE_START_QUIZ = float(os.environ.get("MIN_SECONDS_SINCE_START_QUIZ", "15"))
@@ -841,10 +853,10 @@ async def click_button_or_follow_deep_link(client, message, row, col, stage_name
       - Any other URL (not a recognized bot deep link): we can't safely
         automate arbitrary link-opening, so this raises a clear failure
         rather than silently doing nothing.
-    click_mode only affects the callback-button case ("await", the default,
-    is used unconditionally for URL buttons and by the per-answer callers,
-    which always pass the default -- see START_QUIZ_CLICK_MODE's comment
-    for why this is opt-in and Start-Quiz-only):
+    click_mode only affects the callback-button case ("await" is always used
+    unconditionally for URL buttons, regardless of what the caller passes --
+    see START_QUIZ_CLICK_MODE / ANSWER_CLICK_MODE for how callers choose a
+    mode for their respective click):
       - "await": click and wait for Telegram's confirmation as before.
       - "fire_and_forget": send the click, don't wait for the bot's
         response -- return immediately so the caller can move on to
@@ -873,7 +885,7 @@ async def click_button_or_follow_deep_link(client, message, row, col, stage_name
         return bot_entity
 
     if click_mode == "skip":
-        log(stage_name, "OK", "click skipped (START_QUIZ_CLICK_MODE=skip)")
+        log(stage_name, "OK", "click skipped (click_mode=skip)")
         return None
 
     # Not a URL button -> normal callback button, .click() is correct here.
@@ -1260,7 +1272,7 @@ async def main():
                 for row_idx, row in enumerate(q_message.buttons):
                     for col_idx, _ in enumerate(row):
                         if flat_idx == answer_index:
-                            await click_button_or_follow_deep_link(client, q_message, row_idx, col_idx, stage)
+                            await click_button_or_follow_deep_link(client, q_message, row_idx, col_idx, stage, click_mode=ANSWER_CLICK_MODE)
                             clicked = True
                             break
                         flat_idx += 1
