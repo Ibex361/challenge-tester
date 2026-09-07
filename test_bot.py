@@ -622,8 +622,8 @@ QUIZ_SESSIONS = {
     "quiz5": QUIZ_5_ORDER_TYPES,
     "quiz6": QUIZ_6_RISK_ORDERS,
     "section_6_quiz": SECTION_6_QUIZ,
-    "cla_7A": CLA_7A,
-    "cla_7B": CLA_7B,
+    "cla_7a": CLA_7A,
+    "cla_7b": CLA_7B,
 }
 
 TOTAL_QUESTIONS = 5
