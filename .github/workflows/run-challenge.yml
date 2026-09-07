@@ -247,6 +247,14 @@ jobs:
           # qwen3.6-27b) each logged into its own separate Telegram account,
           # with no shared state between the two jobs. Masked so it never
           # appears in logs, same as any other secret-derived value.
+          #
+          # Also outputs the plain account name (SAF/ETH, not a secret --
+          # no masking needed) as-is, so the same "account" choice also
+          # picks which control/pacing_<account>.json file
+          # run_challenge.py loads (PACING_CONFIG_NAME below) -- no
+          # separate pacing-file selector to set; choosing an account
+          # implies its matching pacing file, per user's explicit
+          # requirement (2026-09-06).
           account="${{ github.event.inputs.account || 'SAF' }}"
           if [ "$account" == "SAF" ]; then
             session="$SAF_TG_SESSION"
@@ -259,6 +267,7 @@ jobs:
           fi
           echo "::add-mask::$session"
           echo "session=$session" >> "$GITHUB_OUTPUT"
+          echo "account=$account" >> "$GITHUB_OUTPUT"
           echo "Using Telegram account: $account"
 
       - name: Run challenge flow
@@ -266,6 +275,11 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ steps.resolve_account.outputs.session }}
+          # Picks control/pacing_SAF.json or control/pacing_ETH.json --
+          # same "account" choice as TG_SESSION above, so selecting an
+          # account automatically implies its matching pacing file (no
+          # separate selector).
+          PACING_CONFIG_NAME: ${{ steps.resolve_account.outputs.account }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # 3 separate Groq accounts (separate orgs/ITPM quotas), round-
           # robin'd across the 5 questions by run_challenge.py so no

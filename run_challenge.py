@@ -8,7 +8,8 @@ Flow:
   4. For each of 5 questions: read question + options, ask Gemini which
      option is correct, click that option's button.
   5. Each question's click is paced: it never lands sooner than that
-     question's configured floor (control/pacing.json) after the
+     question's configured floor (control/pacing_SAF.json or
+     control/pacing_ETH.json, per the selected account) after the
      question's message was received, so no question gets answered
      near-instantly.
 
@@ -363,21 +364,32 @@ SECTION_NOTES_TEXT = _load_section_notes()
 # ceiling -- e.g. if 28s have passed and a question's own floor would
 # reach 33s, it only waits 2s (to reach 30s), not the full floor.
 #
-# Lives in control/pacing.json (not an env var) so it's editable straight
-# from GitHub's web UI without touching the workflow or any secrets.
-# Shape:
+# Lives in control/pacing_<PACING_CONFIG_NAME>.json (not a single shared
+# file) so SAF and ETH -- the two Telegram testing accounts selectable via
+# the workflow's "account" dropdown -- can be paced differently, e.g. if
+# one account's timing pattern needs to look distinct from the other's.
+# PACING_CONFIG_NAME defaults to "SAF" (matching the workflow's own
+# account-dropdown default) and is resolved automatically from the SAME
+# "account" choice at the workflow level -- there's no separate pacing
+# file selector to set; choosing SAF/ETH as the account implies its
+# matching pacing file. Editable straight from GitHub's web UI without
+# touching the workflow or any secrets. Shape:
 #   {"default": 3, "1": 2, "2": 2, "3": 2.5, "4": 3, "5": 3, "max_quiz_seconds": 30}
 # "default" and "max_quiz_seconds" are both required. "default" is the
 # floor for any question number not given its own key. A minimal
 # {"default": 3, "max_quiz_seconds": 30} with no per-question keys is
 # valid too -- every question then uses the same 3s floor, capped at 30s
 # total.
-PACING_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "control", "pacing.json")
+PACING_CONFIG_NAME = os.environ.get("PACING_CONFIG_NAME", "SAF")
+PACING_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "control", f"pacing_{PACING_CONFIG_NAME}.json"
+)
 
 
 def _load_pacing_config() -> tuple[dict, float]:
     """
-    Reads control/pacing.json and returns (per_question, max_quiz_seconds):
+    Reads control/pacing_<PACING_CONFIG_NAME>.json and returns
+    (per_question, max_quiz_seconds):
       - per_question: {question_number: seconds} resolved for every
         question in 1..TOTAL_QUESTIONS (falling back to "default" for any
         question not explicitly listed).
@@ -394,21 +406,24 @@ def _load_pacing_config() -> tuple[dict, float]:
         with open(PACING_CONFIG_PATH, "r", encoding="utf-8") as f:
             raw = json.load(f)
     except FileNotFoundError:
-        raise SystemExit(f"control/pacing.json not found at {PACING_CONFIG_PATH} -- required for per-question pacing.")
+        raise SystemExit(
+            f"control/pacing_{PACING_CONFIG_NAME}.json not found at {PACING_CONFIG_PATH} "
+            "-- required for per-question pacing."
+        )
     except json.JSONDecodeError as e:
-        raise SystemExit(f"control/pacing.json is not valid JSON: {e}")
+        raise SystemExit(f"control/pacing_{PACING_CONFIG_NAME}.json is not valid JSON: {e}")
 
     if not isinstance(raw, dict) or "default" not in raw or "max_quiz_seconds" not in raw:
         raise SystemExit(
-            'control/pacing.json must be a JSON object with "default" and "max_quiz_seconds" keys, '
-            'e.g. {"default": 3, "max_quiz_seconds": 30}.'
+            f'control/pacing_{PACING_CONFIG_NAME}.json must be a JSON object with "default" and '
+            '"max_quiz_seconds" keys, e.g. {"default": 3, "max_quiz_seconds": 30}.'
         )
 
     def _as_seconds(value, key):
         try:
             return float(value)
         except (TypeError, ValueError):
-            raise SystemExit(f"control/pacing.json: value for {key!r} must be a number, got {value!r}.")
+            raise SystemExit(f"control/pacing_{PACING_CONFIG_NAME}.json: value for {key!r} must be a number, got {value!r}.")
 
     default_seconds = _as_seconds(raw["default"], "default")
     max_quiz_seconds = _as_seconds(raw["max_quiz_seconds"], "max_quiz_seconds")
@@ -1316,8 +1331,8 @@ async def main():
             quiz_deadline = datetime.now(timezone.utc) + timedelta(minutes=QUIZ_TIMEOUT_MINUTES)
 
             await click_button_or_follow_deep_link(client, start_quiz_message, loc[0], loc[1], "Click Start Quiz", click_mode=START_QUIZ_CLICK_MODE)
-            # Anchor for MAX_QUIZ_SECONDS (control/pacing.json): taken right
-            # at the click itself, not any response to it -- in
+            # Anchor for MAX_QUIZ_SECONDS (control/pacing_<account>.json):
+            # taken right at the click itself, not any response to it -- in
             # fire_and_forget mode there may be no prompt response to
             # anchor to at all, and even in "await" mode the response time
             # is itself variable, so the click is the only stable,
@@ -1384,15 +1399,16 @@ async def main():
                     answer_text = _strip_redundant_letter_prefix(options[answer_index], answer_letter) if answer_index < len(options) else "?"
                     log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
 
-                # Per-question pacing floor (control/pacing.json): hold the
-                # click back until at least this question's configured
-                # number of seconds have passed since its message arrived.
-                # Anchored to message receipt (not e.g. Groq's response
-                # time) so a slow Groq call -- including a rate-limit
-                # backoff -- already counts toward the floor; the sleep
-                # below only fires when Groq answered faster than the
-                # floor allows. Applies to every question now, not just
-                # the last one (see 2026-09-06 decision in context.json).
+                # Per-question pacing floor (control/pacing_<account>.json):
+                # hold the click back until at least this question's
+                # configured number of seconds have passed since its
+                # message arrived. Anchored to message receipt (not e.g.
+                # Groq's response time) so a slow Groq call -- including a
+                # rate-limit backoff -- already counts toward the floor;
+                # the sleep below only fires when Groq answered faster
+                # than the floor allows. Applies to every question now,
+                # not just the last one (see 2026-09-06 decision in
+                # context.json).
                 #
                 # Capped by MAX_QUIZ_SECONDS: the wait is trimmed (never
                 # extended) so total time since the Start Quiz click never
