@@ -33,7 +33,70 @@ from telethon.tl.custom import Message
 
 from google import genai
 from google.genai import types as genai_types
+import groq
 from groq import Groq
+
+
+# ----------------------------------------------------------------------
+# Small helpers for clear, stage-based logging -- deliberately defined
+# BEFORE the Configuration section below, so that config-validation
+# failures (the raise SystemExit(...) calls in that section) can log
+# through the same log()/flush_summary() machinery as every other
+# failure, instead of only ever appearing as a bare, timestamp-less
+# traceback line in the raw Actions log with nothing written to the Job
+# Summary tab. Added 2026-09-07 after noticing this gap during a logging
+# audit -- previously log()/flush_summary() were defined much later in
+# the file (after all config parsing), so a bad env var or a malformed
+# control/pacing_<account>.json produced no Job Summary output at all.
+# ----------------------------------------------------------------------
+
+SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY")
+_summary_lines = []
+
+
+def log(stage: str, status: str, detail: str = ""):
+    """
+    status: one of "START", "OK", "FAIL", "INFO", "TIMEOUT"
+    Prints to stdout immediately AND buffers a line for the job summary.
+    """
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    symbol = {
+        "START": "▶",
+        "OK": "✅",
+        "FAIL": "❌",
+        "INFO": "ℹ️",
+        "TIMEOUT": "⏰",
+    }.get(status, "•")
+    line = f"[{ts} UTC] {symbol} {stage}" + (f" — {detail}" if detail else "")
+    print(line, flush=True)
+    _summary_lines.append(f"| {ts} | {status} | {stage} | {detail} |")
+
+
+def flush_summary(overall_result: str):
+    if not SUMMARY_PATH:
+        return
+    with open(SUMMARY_PATH, "a", encoding="utf-8") as f:
+        f.write(f"\n## Challenge run result: {overall_result}\n\n")
+        f.write("| Time (UTC) | Status | Stage | Detail |\n")
+        f.write("|---|---|---|---|\n")
+        f.write("\n".join(_summary_lines))
+        f.write("\n")
+
+
+def _fail_config(stage: str, detail: str):
+    """
+    Config-validation failure helper: logs through the normal log() +
+    flush_summary() path (so it shows up in the Job Summary tab exactly
+    like any runtime StageFailure does, with a timestamp and a clear
+    header), then exits with the same SystemExit behavior the direct
+    `raise SystemExit(...)` calls below already had -- argv/exit code
+    and Actions' own failure marking are unchanged, this only adds
+    logging on the way out. Zero cost on the success path: this only
+    executes when a run is already about to fail at startup.
+    """
+    log(stage, "FAIL", detail)
+    flush_summary(f"FAILED at startup: {stage} — {detail}")
+    raise SystemExit(f"{stage}: {detail}")
 
 
 # ----------------------------------------------------------------------
@@ -65,9 +128,9 @@ GROQ_API_KEYS = [
 # testing); "gemini" is kept available as a fallback / for comparison.
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq").lower()
 if AI_PROVIDER not in ("groq", "gemini"):
-    raise SystemExit(f"AI_PROVIDER must be 'groq' or 'gemini', got {AI_PROVIDER!r}")
+    _fail_config("Startup config", f"AI_PROVIDER must be 'groq' or 'gemini', got {AI_PROVIDER!r}")
 if AI_PROVIDER == "groq" and not GROQ_API_KEYS:
-    raise SystemExit("AI_PROVIDER=groq requires at least one of GROQ_API_KEY_1/2/3 to be set.")
+    _fail_config("Startup config", "AI_PROVIDER=groq requires at least one of GROQ_API_KEY_1/2/3 to be set.")
 
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 
@@ -191,9 +254,10 @@ RETRY_INTERVAL_SECONDS = float(os.environ.get("RETRY_INTERVAL_SECONDS", "2"))
 
 OPEN_TIME_UTC = TEST_ACTIVATION_TIME_UTC if TEST_MODE else CHALLENGE_OPEN_TIME_UTC
 if TEST_MODE and not OPEN_TIME_UTC:
-    raise SystemExit(
+    _fail_config(
+        "Startup config",
         "TEST_ACTIVATION_TIME_UTC is required in test mode -- set it to the same "
-        "activation time (HH:MM, UTC) you gave the 'Run Test Bot' workflow."
+        "activation time (HH:MM, UTC) you gave the 'Run Test Bot' workflow.",
     )
 
 # Once Start Quiz has been clicked, this is the separate time budget for the
@@ -288,7 +352,7 @@ _DEFAULT_GROQ_SCHEME_NAME = "gpt-oss"
 THINKING_LEVEL = os.environ.get("THINKING_LEVEL", "low").strip().lower()
 _VALID_THINKING_LEVELS = ("minimal", "low", "medium", "high")
 if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
-    raise SystemExit(f"THINKING_LEVEL must be one of {_VALID_THINKING_LEVELS}, got {THINKING_LEVEL!r}")
+    _fail_config("Startup config", f"THINKING_LEVEL must be one of {_VALID_THINKING_LEVELS}, got {THINKING_LEVEL!r}")
 
 # Groq-specific value derived from THINKING_LEVEL + GROQ_MODEL -- see
 # GROQ_REASONING_SCHEMES and _resolve_groq_reasoning_effort above. Can be
@@ -406,24 +470,26 @@ def _load_pacing_config() -> tuple[dict, float]:
         with open(PACING_CONFIG_PATH, "r", encoding="utf-8") as f:
             raw = json.load(f)
     except FileNotFoundError:
-        raise SystemExit(
+        _fail_config(
+            "Startup config",
             f"control/pacing_{PACING_CONFIG_NAME}.json not found at {PACING_CONFIG_PATH} "
-            "-- required for per-question pacing."
+            "-- required for per-question pacing.",
         )
     except json.JSONDecodeError as e:
-        raise SystemExit(f"control/pacing_{PACING_CONFIG_NAME}.json is not valid JSON: {e}")
+        _fail_config("Startup config", f"control/pacing_{PACING_CONFIG_NAME}.json is not valid JSON: {e}")
 
     if not isinstance(raw, dict) or "default" not in raw or "max_quiz_seconds" not in raw:
-        raise SystemExit(
+        _fail_config(
+            "Startup config",
             f'control/pacing_{PACING_CONFIG_NAME}.json must be a JSON object with "default" and '
-            '"max_quiz_seconds" keys, e.g. {"default": 3, "max_quiz_seconds": 30}.'
+            '"max_quiz_seconds" keys, e.g. {"default": 3, "max_quiz_seconds": 30}.',
         )
 
     def _as_seconds(value, key):
         try:
             return float(value)
         except (TypeError, ValueError):
-            raise SystemExit(f"control/pacing_{PACING_CONFIG_NAME}.json: value for {key!r} must be a number, got {value!r}.")
+            _fail_config("Startup config", f"control/pacing_{PACING_CONFIG_NAME}.json: value for {key!r} must be a number, got {value!r}.")
 
     default_seconds = _as_seconds(raw["default"], "default")
     max_quiz_seconds = _as_seconds(raw["max_quiz_seconds"], "max_quiz_seconds")
@@ -443,43 +509,6 @@ PACING_SECONDS_BY_QUESTION, MAX_QUIZ_SECONDS = _load_pacing_config()
 # handler registration in main() for why it's scoped rather than global).
 # Turn off once things are working reliably.
 DEBUG_LOG_ALL_EVENTS = os.environ.get("DEBUG_LOG_ALL_EVENTS", "false").lower() == "true"
-
-
-# ----------------------------------------------------------------------
-# Small helpers for clear, stage-based logging
-# ----------------------------------------------------------------------
-
-SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY")
-_summary_lines = []
-
-
-def log(stage: str, status: str, detail: str = ""):
-    """
-    status: one of "START", "OK", "FAIL", "INFO", "TIMEOUT"
-    Prints to stdout immediately AND buffers a line for the job summary.
-    """
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
-    symbol = {
-        "START": "▶",
-        "OK": "✅",
-        "FAIL": "❌",
-        "INFO": "ℹ️",
-        "TIMEOUT": "⏰",
-    }.get(status, "•")
-    line = f"[{ts} UTC] {symbol} {stage}" + (f" — {detail}" if detail else "")
-    print(line, flush=True)
-    _summary_lines.append(f"| {ts} | {status} | {stage} | {detail} |")
-
-
-def flush_summary(overall_result: str):
-    if not SUMMARY_PATH:
-        return
-    with open(SUMMARY_PATH, "a", encoding="utf-8") as f:
-        f.write(f"\n## Challenge run result: {overall_result}\n\n")
-        f.write("| Time (UTC) | Status | Stage | Detail |\n")
-        f.write("|---|---|---|---|\n")
-        f.write("\n".join(_summary_lines))
-        f.write("\n")
 
 
 class _TelethonFloodWaitLogHandler(logging.Handler):
@@ -778,6 +807,32 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
     )
 
 
+def _describe_groq_error(e: Exception) -> str:
+    """
+    Extracts the useful detail from a Groq SDK exception for logging --
+    specifically for RateLimitError (429/ITPM), where the parsed response
+    body already contains the full human-readable detail (limit/used/
+    requested numbers, retry hint, e.g. "Rate limit reached for model
+    `qwen/qwen3.6-27b` ... Limit 7000, Used 6032, Requested 2115. Please
+    try again in 9.8s") -- confirmed against the installed groq==1.7.0
+    source: APIStatusError.body is json.loads() of the response text when
+    it's valid JSON, same shape Groq's own dashboard shows. Prefers
+    body["message"] (the clean sentence) over e.message (which wraps it as
+    "Error code: 429 - {the whole dict}") when available. Falls back to
+    str(e) for any exception type that doesn't carry this structure
+    (network errors, timeouts, etc.), so this is always safe to call.
+    Added 2026-09-07 after having to manually check groq.com's own
+    console to get this same detail for a real ITPM incident -- now it's
+    in the run's own log instead.
+    """
+    if isinstance(e, groq.APIStatusError):
+        if isinstance(e.body, dict) and "message" in e.body:
+            code = e.body.get("code")
+            return e.body["message"] + (f" [code={code}]" if code else "")
+        return e.message
+    return str(e)
+
+
 def _log_groq_usage(resp, attempt_label: str) -> None:
     """
     Logs actual token usage from a Groq response -- prompt/completion/total,
@@ -883,12 +938,14 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
                     log(
                         f"Groq answer ({attempt_label})",
                         "INFO",
-                        f"API call failed ({e.__class__.__name__}), retrying (attempt {attempt}/{max_attempts})",
+                        f"API call failed ({e.__class__.__name__}: {_describe_groq_error(e)}), "
+                        f"retrying (attempt {attempt}/{max_attempts})",
                     )
                     time.sleep(0.5)
         raise StageFailure(
             f"Groq answer ({attempt_label})",
-            f"Groq API call failed after {max_attempts} attempts: {last_error}",
+            f"Groq API call failed after {max_attempts} attempts: "
+            f"{last_error.__class__.__name__}: {_describe_groq_error(last_error)}",
         )
 
     def _try_once():
@@ -1187,6 +1244,34 @@ async def message_bot_with_retry_until_active(
 async def main():
     _install_telethon_flood_wait_logging()
 
+    # Consolidated startup config summary -- everything that affects HOW
+    # this run behaves, resolved and printed together in one place. Added
+    # 2026-09-07 after noticing this info was previously only
+    # reconstructable by cross-referencing several scattered sources (the
+    # workflow's override-or-default echo lines, the section-notes/pacing
+    # print lines, this script's own env var defaults) -- e.g. confirming
+    # which Groq model a "no overrides" run actually resolved to required
+    # reading the source. One log() call, no extra I/O or network access,
+    # so this adds no latency -- purely printing values already resolved
+    # above.
+    log(
+        "Startup config",
+        "INFO",
+        f"mode={'TEST MODE' if TEST_MODE else 'real mode'} | "
+        f"AI_PROVIDER={AI_PROVIDER} | "
+        + (
+            f"GROQ_MODEL={GROQ_MODEL} reasoning_effort={GROQ_REASONING_EFFORT!r} "
+            f"groq_accounts={len(_groq_clients)} ({', '.join(name for name, _ in _groq_clients)})"
+            if AI_PROVIDER == "groq"
+            else f"GEMINI_MODEL={GEMINI_MODEL}"
+        )
+        + f" | THINKING_LEVEL={THINKING_LEVEL} | "
+        f"START_QUIZ_CLICK_MODE={START_QUIZ_CLICK_MODE} ANSWER_CLICK_MODE={ANSWER_CLICK_MODE} | "
+        f"PACING_CONFIG_NAME={PACING_CONFIG_NAME} | "
+        f"SECTION_NOTES={SECTION_NOTES_NAME or '(none)'} | "
+        f"TOTAL_QUESTIONS={TOTAL_QUESTIONS}",
+    )
+
     now = datetime.now(timezone.utc)
 
     open_time = today_utc_at(OPEN_TIME_UTC)
@@ -1416,16 +1501,33 @@ async def main():
                 # question's floor would reach 33s, it only waits 2s (to
                 # reach 30s), not the full floor. If the ceiling has
                 # already been reached, this question isn't paced at all.
+                # Both log lines below include the underlying numbers
+                # (floor, elapsed, quiz budget used) so pacing_SAF.json /
+                # pacing_ETH.json can be tuned from the log alone, without
+                # re-deriving them from raw timestamps (added 2026-09-07).
                 elapsed_since_question = time.monotonic() - question_received_at
                 floor = PACING_SECONDS_BY_QUESTION[q_num]
                 elapsed_since_quiz_start = time.monotonic() - quiz_click_at
                 remaining_quiz_budget = MAX_QUIZ_SECONDS - elapsed_since_quiz_start
                 wait_for = min(floor - elapsed_since_question, remaining_quiz_budget)
                 if wait_for > 0:
-                    log(stage, "INFO", f"pacing: waiting {wait_for:.1f}s before click")
+                    capped_note = " (capped by MAX_QUIZ_SECONDS)" if wait_for < floor - elapsed_since_question else ""
+                    log(
+                        stage,
+                        "INFO",
+                        f"pacing: waiting {wait_for:.1f}s before click{capped_note} "
+                        f"(floor={floor:.1f}s, {elapsed_since_question:.1f}s already elapsed for this "
+                        f"question; quiz budget: {elapsed_since_quiz_start:.1f}s/{MAX_QUIZ_SECONDS:.1f}s used)",
+                    )
                     await asyncio.sleep(wait_for)
                 elif elapsed_since_question < floor:
-                    log(stage, "INFO", f"pacing: skipping wait -- MAX_QUIZ_SECONDS ({MAX_QUIZ_SECONDS:.0f}s) already reached")
+                    log(
+                        stage,
+                        "INFO",
+                        f"pacing: skipping wait -- MAX_QUIZ_SECONDS ({MAX_QUIZ_SECONDS:.1f}s) already reached "
+                        f"({elapsed_since_quiz_start:.1f}s elapsed since quiz start; this question's floor was "
+                        f"{floor:.1f}s, only {elapsed_since_question:.1f}s had passed)",
+                    )
 
                 # Buttons were flattened row-by-row in extract_mcq_options; map
                 # the flat index back to (row, col) for the click.
