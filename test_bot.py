@@ -491,6 +491,127 @@ SECTION_6_QUIZ = [
     },
 ]
 
+# -- Claude-generated quizzes for Section 7 (Leverage & Margin), from
+# section_7.md. NAMING CONVENTION (per user, 2026-09-07): "cla_<N><letter>"
+# is for Claude-generated quiz questions (as opposed to real questions
+# taken from a live challenge bot run, which get a descriptive name like
+# SECTION_6_QUIZ above) -- "cla" = Claude, "<N>" = section number, and
+# "A"/"B"/"C"... distinguishes multiple Claude-generated sets for the same
+# section. CLA_7A = 5 hard conceptual questions (mechanism/definitions, no
+# numbers to plug in); CLA_7B = calculation + video-referential questions
+# (worked-example numbers, named brokers/thresholds, "what did the video
+# state" style) -- both per user's explicit request for "hard conceptual
+# and some referential (to the video)" questions.
+CLA_7A = [
+    {
+        "text": (
+            "In the house-purchase analogy, why is the bank's 900,000 Birr described as something that "
+            "can never actually be lost from the bank's own perspective?\n"
+            "A) The bank insures the property separately\n"
+            "B) The bank sells the property itself to recover its share once its value falls to that amount, so only the buyer's own contribution absorbs any loss\n"
+            "C) The government guarantees the bank's contribution\n"
+            "D) The bank and buyer always split any loss equally"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": "In the Forex translation of the house analogy, what does the trader's own contribution toward a position correspond to?",
+        "options": ["Leverage", "Margin", "Equity", "Stop Out"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Why is a profit showing on a currently open position called \"Unrealized\" rather than simply counted as final profit?\n"
+            "A) Because taxes haven't been paid on it yet\n"
+            "B) Because the broker hasn't approved it yet\n"
+            "C) Because the price could still reverse into a loss at any moment before the position is closed\n"
+            "D) Because it only becomes real after 24 hours"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+    {
+        "text": "According to the module, what does a rising Margin Level % indicate about an account, and what does a falling Margin Level % indicate?",
+        "options": [
+            "Rising = safer/healthier account; falling = increasing losses relative to account size, more likely the broker closes positions",
+            "Rising = more risk of a Margin Call; falling = the account is safer",
+            "Margin Level % only reflects deposit history, not risk",
+            "Rising and falling both indicate the same risk level -- it's a neutral metric",
+        ],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "What is the key structural difference between a Margin Call and a Stop Out, according to the module?\n"
+            "A) A Margin Call is a warning notification asking the trader to act; a Stop Out is the broker automatically closing positions itself without waiting for the trader\n"
+            "B) A Margin Call closes positions automatically; a Stop Out is just a warning\n"
+            "C) They are two names for the exact same event\n"
+            "D) A Margin Call only applies to Professional accounts; a Stop Out only applies to standard accounts"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+    },
+]
+
+CLA_7B = [
+    {
+        "text": (
+            "In the worked Margin Level example, Account Balance = $1,000, Leverage = 1:100, and the trader opens 0.1 lot (10,000 units) on EUR/USD. "
+            "What is the resulting Margin Level %?\n"
+            "A) 100%\n"
+            "B) 1,000%\n"
+            "C) 10%\n"
+            "D) 500%"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": "In the module's Equity worked example with two open trades (one at +$5, one at -$10) and a $100 Balance, what is the resulting Equity?",
+        "options": ["$105", "$95", "$100", "$90"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "Which brokers did the video name specifically as issuing a Margin Call at 100% Margin Level (standard accounts)?\n"
+            "A) Exness and Pepperstone\n"
+            "B) IC Markets and Pepperstone\n"
+            "C) Exness and IC Markets\n"
+            "D) FXTM and Exness"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": "Which two brokers did the video name as waiting until 0% Margin Level before triggering Stop Out, because of a feature called Negative Balance Protection?",
+        "options": ["Exness and IC Markets", "IC Markets and Pepperstone", "Exness and Pepperstone", "FXTM and IC Markets"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "In the house-purchase profit scenario, the property was bought at 1,000,000 Birr and sold 6 months later at 1,500,000 Birr. "
+            "What profit figure did the video state?\n"
+            "A) 900,000 Birr\n"
+            "B) 100,000 Birr\n"
+            "C) 500,000 Birr\n"
+            "D) 1,500,000 Birr"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
@@ -501,6 +622,8 @@ QUIZ_SESSIONS = {
     "quiz5": QUIZ_5_ORDER_TYPES,
     "quiz6": QUIZ_6_RISK_ORDERS,
     "section_6_quiz": SECTION_6_QUIZ,
+    "cla_7A": CLA_7A,
+    "cla_7B": CLA_7B,
 }
 
 TOTAL_QUESTIONS = 5
