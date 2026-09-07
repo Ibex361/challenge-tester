@@ -211,19 +211,25 @@ TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 #
 # Real mode and test mode both follow this exact same shape, just anchored
 # to a different open time:
-#   - real mode  -> CHALLENGE_OPEN_TIME_UTC        (default 17:00:01 UTC --
-#                    NOT a plain 17:00. Deliberately offset by 1 second, and
-#                    intentionally NOT exposed as a workflow_dispatch input
-#                    -- only settable via a GitHub secret/repo variable
-#                    wired into this env var directly, so it can't be
-#                    fat-fingered per-run from the Actions UI. See
-#                    2026-09-05 notes: the confirmed ~15s Start-Quiz-click
-#                    latency under real 17:00 UTC load might be worse for a
+#   - real mode  -> control/challenge_open_time.json  (default 8:00:01 PM
+#                    EAT, i.e. 17:00:01 UTC -- NOT a plain 8:00 PM/17:00.
+#                    Deliberately offset by 1 second -- see 2026-09-05
+#                    notes: the confirmed ~15s Start-Quiz-click latency
+#                    under real 17:00 UTC load might be worse for a
 #                    request landing at the EXACT instant the challenge
-#                    opens (thundering-herd-style burst) than one landing a
-#                    beat later -- unconfirmed, but cheap to hedge against,
-#                    and this makes the offset itself easy to A/B tune
-#                    later without a code change.)
+#                    opens (thundering-herd-style burst) than one landing
+#                    a beat later -- unconfirmed, but cheap to hedge
+#                    against, and this makes the offset itself easy to A/B
+#                    tune later without a code change. Lives in this repo
+#                    file rather than a GitHub secret so it's editable
+#                    directly from GitHub's web UI, entered in EAT
+#                    12-hour format (e.g. "8:00:01 PM") -- converted to
+#                    UTC internally at import time; every deadline/retry
+#                    computation below still runs in UTC, only the config
+#                    entry point and the "too early" message are EAT-
+#                    facing. Replaces the old CHALLENGE_OPEN_TIME_UTC
+#                    secret (2026-09-07 -- removed as redundant once this
+#                    file existed).
 #   - test mode  -> TEST_ACTIVATION_TIME_UTC        (whatever you set when
 #                    you start the test bot, e.g. "13:00" -- test_bot.py
 #                    enforces the exact same gate on its side, so test mode
@@ -246,7 +252,94 @@ CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
 # per-account send-rate limit kicked in (FloodWaitError, "A wait of 3335
 # seconds is required" -- an unhandled crash, not a clean stop).
 CHALLENGE_CLOSED_TEXT = "This challenge ended at"
-CHALLENGE_OPEN_TIME_UTC = os.environ.get("CHALLENGE_OPEN_TIME_UTC", "17:00:01")       # HH:MM[:SS], UTC -- real mode, secret-controlled only (see comment above)
+
+# EAT (East Africa Time) is UTC+3 year-round -- no daylight saving, so this
+# is a safe fixed offset rather than something that needs a timezone
+# database lookup.
+EAT_UTC_OFFSET_HOURS = 3
+
+EAT_TIME_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "control", "challenge_open_time.json")
+
+
+def _parse_12h_eat_time(text: str) -> tuple[int, int, int]:
+    """
+    Parses a 12-hour EAT time string with required seconds, e.g.
+    "8:00:01 PM" or "8:00:01 AM", into 24-hour (hour, minute, second).
+    Seconds are required (not optional) per this project's explicit need
+    for sub-minute precision here (see EAT_UTC_OFFSET_HOURS comment above
+    for why 17:00:01 and not a flat 17:00 matters). Raises ValueError with
+    a clear message on anything else -- caught by the caller and turned
+    into a _fail_config() call, not left to surface as a raw traceback.
+    """
+    m = re.fullmatch(r"\s*(\d{1,2}):(\d{2}):(\d{2})\s*([AaPp][Mm])\s*", text)
+    if not m:
+        raise ValueError(f'expected 12-hour time with seconds, e.g. "8:00:01 PM", got {text!r}')
+    hour, minute, second, ampm = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4).upper()
+    if not (1 <= hour <= 12):
+        raise ValueError(f"hour must be 1-12 for 12-hour format, got {hour}")
+    if not (0 <= minute <= 59 and 0 <= second <= 59):
+        raise ValueError(f"minute/second out of range in {text!r}")
+    hour_24 = hour % 12  # 12 AM -> 0, 12 PM -> 12, else unchanged
+    if ampm == "PM":
+        hour_24 += 12
+    return hour_24, minute, second
+
+
+def _load_challenge_open_time_utc() -> tuple[str, str]:
+    """
+    Reads control/challenge_open_time.json (open_time_eat, 12-hour EAT
+    with required seconds) and returns (utc_str, eat_str):
+      - utc_str is the equivalent UTC time as "HH:MM:SS", ready for
+        today_utc_at() -- the same string shape CHALLENGE_OPEN_TIME_UTC
+        used to be, so nothing downstream needs to change to stay
+        EAT-aware.
+      - eat_str is the original EAT string as given in the config file
+        (e.g. "8:00:01 PM"), kept around purely so main()'s "too early"
+        and waiting messages can show EAT -- the time the person
+        actually recognizes -- alongside/instead of UTC. Every
+        deadline/retry computation still runs on utc_str internally;
+        eat_str is display-only.
+
+    Like pacing config, this is required and fails loudly (_fail_config)
+    on anything missing/malformed rather than silently falling back --
+    the real challenge start time is exactly the kind of thing that must
+    not silently default to something wrong.
+    """
+    try:
+        with open(EAT_TIME_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        _fail_config(
+            "Startup config",
+            f"control/challenge_open_time.json not found at {EAT_TIME_CONFIG_PATH} -- required for real-mode timing.",
+        )
+    except json.JSONDecodeError as e:
+        _fail_config("Startup config", f"control/challenge_open_time.json is not valid JSON: {e}")
+
+    if not isinstance(raw, dict) or "open_time_eat" not in raw:
+        _fail_config(
+            "Startup config",
+            'control/challenge_open_time.json must be a JSON object with an "open_time_eat" key, '
+            'e.g. {"open_time_eat": "8:00:01 PM"}.',
+        )
+
+    eat_str = raw["open_time_eat"]
+    try:
+        eat_hour, eat_minute, eat_second = _parse_12h_eat_time(eat_str)
+    except ValueError as e:
+        _fail_config("Startup config", f"control/challenge_open_time.json: open_time_eat is invalid -- {e}")
+
+    utc_hour = (eat_hour - EAT_UTC_OFFSET_HOURS) % 24
+    utc_str = f"{utc_hour:02d}:{eat_minute:02d}:{eat_second:02d}"
+    print(f"[challenge open time] Loaded {EAT_TIME_CONFIG_PATH}: {eat_str} EAT -> {utc_str} UTC")
+    return utc_str, eat_str
+
+
+if TEST_MODE:
+    CHALLENGE_OPEN_TIME_UTC = None
+    CHALLENGE_OPEN_TIME_EAT = None
+else:
+    CHALLENGE_OPEN_TIME_UTC, CHALLENGE_OPEN_TIME_EAT = _load_challenge_open_time_utc()
 TEST_ACTIVATION_TIME_UTC = os.environ.get("TEST_ACTIVATION_TIME_UTC")                # HH:MM, UTC -- test mode
 EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "15"))
 RETRY_WINDOW_MINUTES_AFTER_OPEN = float(os.environ.get("RETRY_WINDOW_MINUTES_AFTER_OPEN", "5"))
@@ -561,10 +654,22 @@ def today_utc_at(hh_mm_or_hhmmss: str) -> datetime:
     Parses 'HH:MM' or 'HH:MM:SS' into a UTC datetime for the current UTC
     calendar day. Seconds default to 0 if omitted, for backward
     compatibility with existing HH:MM values (e.g. TEST_ACTIVATION_TIME_UTC
-    inputs, which stay HH:MM-only). CHALLENGE_OPEN_TIME_UTC is the one
-    real-mode value that actually uses seconds precision -- see its own
-    definition/comment for why (2026-09-05: real vs. test 15s Start-Quiz-
-    click-latency investigation).
+    inputs, which stay HH:MM-only). CHALLENGE_OPEN_TIME_UTC (now derived
+    from control/challenge_open_time.json's EAT value, see
+    _load_challenge_open_time_utc) is the one real-mode value that
+    actually uses seconds precision -- see its own definition/comment for
+    why (2026-09-05: real vs. test 15s Start-Quiz-click-latency
+    investigation).
+
+    Pre-existing limitation, unchanged by the 2026-09-07 EAT config
+    addition: this always anchors to TODAY's UTC calendar date, not the
+    date implied by the EAT time. This is harmless for the expected
+    ~8 PM EAT range (mid-afternoon-into-evening UTC, nowhere near the UTC
+    day boundary), but an open_time_eat value between roughly midnight
+    and 3 AM EAT would convert to a UTC time on the PREVIOUS UTC calendar
+    day (e.g. 1:30:15 AM EAT -> 22:30:15 UTC) while still being anchored
+    to today's UTC date here -- worth revisiting if the challenge's
+    schedule ever moves into that window.
     """
     parts = [int(p) for p in hh_mm_or_hhmmss.split(":")]
     hour, minute = parts[0], parts[1]
@@ -1279,12 +1384,21 @@ async def main():
     deadline = open_time + timedelta(minutes=RETRY_WINDOW_MINUTES_AFTER_OPEN)
     mode_label = "TEST MODE" if TEST_MODE else "real mode"
 
+    # Real mode shows the activation time in EAT (what the person actually
+    # recognizes -- control/challenge_open_time.json is entered in EAT),
+    # with UTC alongside for anyone cross-checking logs/timestamps. Test
+    # mode has no EAT value at all (TEST_ACTIVATION_TIME_UTC is UTC-only),
+    # so it keeps the plain UTC-only wording it always had. Only the text
+    # shown here changes -- open_time/earliest_run_time/deadline above are
+    # still computed in UTC exactly as before.
+    open_time_display = f"{CHALLENGE_OPEN_TIME_EAT} EAT ({OPEN_TIME_UTC} UTC)" if not TEST_MODE else f"{OPEN_TIME_UTC} UTC"
+
     if now < earliest_run_time:
         raise StageFailure(
             "Startup check",
             f"[{mode_label}] it's {now.strftime('%H:%M:%S')} UTC, which is more than "
-            f"{EARLIEST_RUN_MINUTES_BEFORE_OPEN:.0f} minutes before the {OPEN_TIME_UTC} UTC activation "
-            f"time. Trigger the workflow again closer to {OPEN_TIME_UTC} UTC.",
+            f"{EARLIEST_RUN_MINUTES_BEFORE_OPEN:.0f} minutes before the {open_time_display} activation "
+            f"time. Trigger the workflow again closer to {open_time_display}.",
         )
 
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -1327,11 +1441,11 @@ async def main():
             if sleep_seconds > 0:
                 log("Startup check", "INFO",
                     f"[{mode_label}] logged in and ready; waiting {int(sleep_seconds)}s until "
-                    f"{OPEN_TIME_UTC} UTC before messaging the bot")
+                    f"{open_time_display} before messaging the bot")
                 await asyncio.sleep(sleep_seconds)
         else:
             log("Startup check", "INFO",
-                f"[{mode_label}] started at {now.strftime('%H:%M:%S')} UTC, at/after {OPEN_TIME_UTC} UTC "
+                f"[{mode_label}] started at {now.strftime('%H:%M:%S')} UTC, at/after {open_time_display} "
                 f"-- messaging the bot now")
 
         # ---- Stage 1 + 2: message the bot, retry if not active yet, wait for Start Quiz ----
