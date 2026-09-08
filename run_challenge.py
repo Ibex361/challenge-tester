@@ -1623,9 +1623,15 @@ async def main():
                 floor = PACING_SECONDS_BY_QUESTION[q_num]
                 elapsed_since_quiz_start = time.monotonic() - quiz_click_at
                 remaining_quiz_budget = MAX_QUIZ_SECONDS - elapsed_since_quiz_start
-                wait_for = min(floor - elapsed_since_question, remaining_quiz_budget)
+                uncapped_wait = floor - elapsed_since_question
+                wait_for = min(uncapped_wait, remaining_quiz_budget)
                 if wait_for > 0:
-                    capped_note = " (capped by MAX_QUIZ_SECONDS)" if wait_for < floor - elapsed_since_question else ""
+                    capped_note = (
+                        f" (capped by MAX_QUIZ_SECONDS — remaining budget {remaining_quiz_budget:.1f}s < "
+                        f"uncapped {uncapped_wait:.1f}s)"
+                        if wait_for < uncapped_wait
+                        else ""
+                    )
                     log(
                         stage,
                         "INFO",
