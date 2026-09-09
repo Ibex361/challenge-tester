@@ -782,6 +782,63 @@ CLA_8D = [
     },
 ]
 
+# -- Real challenge-bot questions for Section 8 (Trading Time Sessions),
+# captured live from an actual challenge run (2026-09-09) and confirmed
+# against the bot's own "CORRECT ANSWERS" summary message, not guessed --
+# see context.json. Q1 (NY session start time) and Q5 (2nd active Asian
+# currency) use the real bot's bare-letter button style (A/B/C/D with the
+# real option text embedded in the question message itself); Q2 (2nd
+# European market), Q3 (most active session), Q4 (kill-zone name) use its
+# full-option-text button style -- matches the real challenge exactly, not
+# a simplified version. NAMING (per user, 2026-09-06 convention): "quizN"
+# is reserved for synthetic quizzes NOT sourced from a live challenge;
+# anything taken from a real live bot run gets a descriptive name instead
+# -- this one is SECTION_8_QUIZ / "section_8_quiz", not "quiz7".
+SECTION_8_QUIZ = [
+    {
+        "text": (
+            "In DLS times when will be the appx starting time of NY session?\n"
+            "A) 12:00 PM\n"
+            "B) 3:00 PM\n"
+            "C) 8:00 AM\n"
+            "D) 4:00 PM"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+    },
+    {
+        "text": "in the section video, what is the 2nd given market from European (London) session",
+        "options": ["Frankfurt", "London", "Zurich", "Paris"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "Which session is the most active one",
+        "options": ["Asian - London", "London - NY", "Asian", "London"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "What do we call the first 1-2 hours of a session",
+        "options": ["Pump Zone", "Kill zone", "Opening Session", "Active Zone"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": (
+            "In the section video, from the given example on the active currencies in Asian time which currency is mentioned 2nd?\n"
+            "A) AUD\n"
+            "B) CNY\n"
+            "C) NZD\n"
+            "D) JPY"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
@@ -798,6 +855,7 @@ QUIZ_SESSIONS = {
     "cla_8b": CLA_8B,
     "cla_8c": CLA_8C,
     "cla_8d": CLA_8D,
+    "section_8_quiz": SECTION_8_QUIZ,
 }
 
 TOTAL_QUESTIONS = 5
