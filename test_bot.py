@@ -612,6 +612,176 @@ CLA_7B = [
     },
 ]
 
+# -- Claude-generated quizzes for Section 8 (Trading Time Sessions), from
+# section_8.md. Per the cla_<N><letter> convention (see CLA_7A/CLA_7B
+# comment above). These 20 questions (CLA_8A-CLA_8D) were deliberately
+# designed per user's explicit request (2026-09-07) to be hard/ambiguous:
+# each question's correct answer sits alongside distractor options that are
+# real values/facts pulled from elsewhere in section_8.md (an adjacent
+# session's time, a sub-market's time instead of the overall session's, a
+# kill-zone time instead of a full-session time, a DST-shifted time instead
+# of the normal one, etc.) rather than made-up wrong answers -- testing
+# whether the model actually distinguishes which specific time range /
+# session / fact a question is asking about, rather than pattern-matching
+# to the first plausible number. CLA_8A/8B = standard-time-phrased
+# questions (5 general session/kill-zone/overlap questions, then 5 on
+# characteristics/currencies/spreads/kill-zone-definition/DST-scope).
+# CLA_8C = 5 more standard-time-phrased ambiguous questions. CLA_8D = 5
+# questions specifically routed through Ethiopian colloquial local time
+# (day/night o'clock split, occasionally using "local") per user's
+# explicit request to add local-time-based ambiguity too. Per user
+# feedback during authoring: options are bare values only (no parenthetical
+# hints revealing which section/concept they're borrowed from), and
+# question stems avoid over-specifying (e.g. no "(non-DST)" qualifier in
+# the stem itself) so the ambiguity is genuine rather than trivially
+# resolved by the question wording alone.
+CLA_8A = [
+    {
+        "text": "When does the New York trading session close?",
+        "options": ["12:00 PM", "8:00 PM", "1:00 AM", "6:00 PM"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "When does the Asian trading session open?",
+        "options": ["12:00 AM", "3:00 AM", "9:00 AM", "4:00 PM"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "When does the Asian trading session close?",
+        "options": ["9:00 AM", "12:00 PM", "11:00 AM", "12:00 AM"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "What is the New York Kill Zone time range?",
+        "options": ["4:00 PM to 8:00 PM", "4:00 PM to 6:00 PM", "4:00 PM to 1:00 AM", "9:00 PM to 11:00 PM"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "What is the London Kill Zone time range?",
+        "options": ["11:00 AM to 1:00 PM", "11:00 AM to 8:00 PM", "10:00 AM to 12:00 PM", "4:00 PM to 6:00 PM"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+]
+
+CLA_8B = [
+    {
+        "text": "What is the time range of the London-New York overlap?",
+        "options": ["4:00 PM to 6:00 PM", "11:00 AM to 8:00 PM", "4:00 PM to 8:00 PM", "4:00 PM to 1:00 AM"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "When does the New York session open?",
+        "options": ["4:00 PM", "3:00 PM", "5:00 PM", "12:00 PM"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "When does the London session close?",
+        "options": ["8:00 PM", "7:00 PM", "6:00 PM", "1:00 AM"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "What are the characteristics of the London session?",
+        "options": [
+            "Low movement, sideways, wider spreads",
+            "Strong, impulsive movement, tighter spreads",
+            "Can strongly continue or fully reverse the prior session's direction",
+            "Most active session due to two regions overlapping",
+        ],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "What are the characteristics of the New York session?",
+        "options": [
+            "Strong, impulsive movement, tighter spreads",
+            "Can strongly continue the prior impulse or reverse it entirely",
+            "Low movement, sideways, wider spreads",
+            "Historically low volume, but improving",
+        ],
+        "correct": 1,
+        "bare_letters": False,
+    },
+]
+
+CLA_8C = [
+    {
+        "text": "Which currencies are most active during the Asian session?",
+        "options": ["EUR, GBP, CHF", "USD, CAD", "AUD, NZD, JPY", "AUD, NZD, JPY, USD"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "Are spreads typically wider or tighter during the Asian session?",
+        "options": [
+            "Wider",
+            "Tighter, since volume has been improving",
+            "Tighter, same as London and New York",
+            "Wider, because of Daylight Saving Time",
+        ],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "How long does a Kill Zone typically last?",
+        "options": ["1 hour", "1-2 hours", "2 hours", "It varies, with no defined length"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "Does the Asian session observe Daylight Saving Time?",
+        "options": ["No", "Yes, shifting by about an hour", "Mostly no, except Sydney", "Only Tokyo does"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "What is the overall time range of the Asian trading session?",
+        "options": ["12:00 AM to 9:00 AM", "3:00 AM to 12:00 PM", "12:00 AM to 12:00 PM", "12:00 AM to 8:00 PM"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+]
+
+CLA_8D = [
+    {
+        "text": "What time does the London session open?",
+        "options": ["5 o'clock", "11 o'clock", "4 o'clock", "10 o'clock"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "During Daylight Saving Time, what time does the New York session close?",
+        "options": ["nighttime 7 o'clock", "nighttime 6 o'clock", "nighttime 1 o'clock", "12:00 o'clock"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "What local time does the Tokyo market close?",
+        "options": ["morning 3 o'clock", "midday 6 o'clock", "nighttime 9 o'clock", "nighttime 6 o'clock"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "What local time does the Sydney market open?",
+        "options": ["nighttime 6 o'clock", "morning 3 o'clock", "3 AM", "nighttime 9 o'clock"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "What local time does the New York Kill Zone end?",
+        "options": ["12:00 o'clock", "10 o'clock", "nighttime 2 o'clock", "7 o'clock"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
@@ -624,6 +794,10 @@ QUIZ_SESSIONS = {
     "section_6_quiz": SECTION_6_QUIZ,
     "cla_7a": CLA_7A,
     "cla_7b": CLA_7B,
+    "cla_8a": CLA_8A,
+    "cla_8b": CLA_8B,
+    "cla_8c": CLA_8C,
+    "cla_8d": CLA_8D,
 }
 
 TOTAL_QUESTIONS = 5

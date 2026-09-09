@@ -35,7 +35,7 @@ on:
         type: string
         default: ""
       test_quiz_selection:
-        description: "Test mode only: which fixed quiz session to run. quiz2 includes the 2 video-reference questions (unanswerable from text alone). quiz4/5/6 are Section 6 (Position Sizing/Order Types/Risk Orders). section_6_quiz is the real challenge_35 questions (2026-09-04). cla_7a/cla_7b are Claude-generated Section 7 (Leverage & Margin) quizzes -- cla_7a is hard conceptual, cla_7b is calculation + video-referential. random picks one of all 9 each run."
+        description: "Test mode only: which fixed quiz session to run. quiz2 includes the 2 video-reference questions (unanswerable from text alone). quiz4/5/6 are Section 6 (Position Sizing/Order Types/Risk Orders). section_6_quiz is the real challenge_35 questions (2026-09-04). cla_7a/cla_7b are Claude-generated Section 7 (Leverage & Margin) quizzes -- cla_7a is hard conceptual, cla_7b is calculation + video-referential. cla_8a/cla_8b/cla_8c/cla_8d are Claude-generated Section 8 (Trading Time Sessions) quizzes, deliberately ambiguous -- distractor options are real values from adjacent sessions/kill-zones/sub-markets/DST-shifts rather than made-up wrong answers; cla_8d uses Ethiopian local o'clock time instead of standard time. random picks one of all 13 each run."
         type: choice
         options:
           - random
@@ -48,6 +48,10 @@ on:
           - section_6_quiz
           - cla_7a
           - cla_7b
+          - cla_8a
+          - cla_8b
+          - cla_8c
+          - cla_8d
         default: random
       challenge_number:
         description: "Challenge number to run (e.g. 34 -> sends '/start challenge_34' to the bot). Not needed if test_mode is checked."
