@@ -123,14 +123,41 @@ GROQ_API_KEYS = [
     if key
 ]
 
+# OpenRouter and Cerebras: added 2026-09-11 as two more free-tier options
+# alongside Groq/Gemini. Both expose an OpenAI-compatible chat.completions
+# endpoint, so -- like Groq -- they're driven through the same `Groq` SDK
+# class, just pointed at a different base_url (confirmed this works: the
+# Groq SDK's client constructor accepts base_url= and is otherwise a thin
+# OpenAI-compatible wrapper). No new SDK dependency needed. Single key
+# only for each (no round-robin pool like Groq's 3 accounts) -- add a
+# pool later the same way GROQ_API_KEYS works if rate limits demand it.
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+# NOTE on Cerebras cost (2026-09-11): Cerebras replaced its no-card free
+# tier with a one-time $5 trial credit around mid-2026 -- a verified
+# payment method is now required to activate API access at all, and the
+# credit expires 30 days after being granted. User has a card on file
+# (showing $0 balance) and has already claimed the $5 trial credit. This
+# is NOT an ongoing free tier -- once the $5 or the 30 days runs out,
+# calls will start failing with a real billing/auth error. See
+# _describe_groq_error's use in ask_cerebras_for_answer -- loud, detailed
+# failure logging here is deliberate so that exhaustion/expiry shows up
+# clearly in the run log rather than as a silent provider switch.
+CEREBRAS_API_KEY = os.environ.get("CEREBRAS_API_KEY")
+
 # Which AI answers the quiz questions. "groq" is the fast path (Groq's LPU
 # hardware gives far more consistent low latency than Gemini has shown in
 # testing); "gemini" is kept available as a fallback / for comparison.
+# "openrouter" and "cerebras" are two more free-tier options (see above).
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq").lower()
-if AI_PROVIDER not in ("groq", "gemini"):
-    _fail_config("Startup config", f"AI_PROVIDER must be 'groq' or 'gemini', got {AI_PROVIDER!r}")
+_VALID_AI_PROVIDERS = ("groq", "gemini", "openrouter", "cerebras")
+if AI_PROVIDER not in _VALID_AI_PROVIDERS:
+    _fail_config("Startup config", f"AI_PROVIDER must be one of {_VALID_AI_PROVIDERS}, got {AI_PROVIDER!r}")
 if AI_PROVIDER == "groq" and not GROQ_API_KEYS:
     _fail_config("Startup config", "AI_PROVIDER=groq requires at least one of GROQ_API_KEY_1/2/3 to be set.")
+if AI_PROVIDER == "openrouter" and not OPENROUTER_API_KEY:
+    _fail_config("Startup config", "AI_PROVIDER=openrouter requires OPENROUTER_API_KEY to be set.")
+if AI_PROVIDER == "cerebras" and not CEREBRAS_API_KEY:
+    _fail_config("Startup config", "AI_PROVIDER=cerebras requires CEREBRAS_API_KEY to be set.")
 
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 
@@ -369,6 +396,26 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # preferred over accuracy again.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b")
 
+# deepseek/deepseek-v4-flash:free -- confirmed live and $0/M in+out on
+# OpenRouter as of 2026-09-11 (openrouter.ai/deepseek/deepseek-v4-flash:free,
+# released Apr 24, 2026): 284B total / 13B active MoE, 1M context, "strong
+# reasoning and coding performance" per OpenRouter's own listing. Picked
+# over openai/gpt-oss-20b:free (the other well-established free option)
+# per user preference for a DeepSeek model specifically. NOTE: free-tier
+# model availability on OpenRouter rotates without much notice (several
+# previously-popular free DeepSeek variants, e.g. deepseek-r1:free, have
+# been pulled to paid-only in the past) -- if this ever 404s/400s, check
+# https://openrouter.ai/deepseek for the current free variant and update
+# via OPENROUTER_MODEL override or this default.
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash:free")
+
+# qwen-3.8-27b is the flagship model in Cerebras's own OpenAI-compatibility
+# docs example (inference-docs.cerebras.ai/resources/openai, 2026-09-11) --
+# natively supports reasoning_effort none/low/medium/high (default high),
+# which maps directly onto the existing THINKING_LEVEL tiers with no
+# scheme compromise needed, unlike Groq's per-model-family quirks below.
+CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", "qwen-3.8-27b")
+
 
 def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str):
     """Look up model_name in GROQ_REASONING_SCHEMES (substring match) and
@@ -442,6 +489,57 @@ GROQ_REASONING_SCHEMES = {
 }
 _DEFAULT_GROQ_SCHEME_NAME = "gpt-oss"
 
+# Same lookup-table pattern as GROQ_REASONING_SCHEMES, one table per
+# provider since OpenRouter and Cerebras each have their own model
+# families with their own valid reasoning_effort values.
+OPENROUTER_REASONING_SCHEMES = {
+    # deepseek/deepseek-v4-flash:free -- OpenRouter's own listing only
+    # documents "high" and "xhigh" as supported reasoning efforts (xhigh
+    # maps to max reasoning); no low/none/minimal is mentioned, so unlike
+    # Groq's qwen3.6 (a genuine on/off switch) there's no confirmed way to
+    # ask this model for less reasoning than "high". minimal/low both fall
+    # back to "high" rather than guessing at an unconfirmed lower value
+    # that might 400 -- if OpenRouter documents a lower tier later, add it
+    # here. medium also maps to "high" for the same reason; only "high"
+    # (interpreted as max effort) uses "xhigh".
+    "deepseek-v4-flash": {
+        "minimal": "high", "low": "high", "medium": "high", "high": "xhigh",
+    },
+}
+_DEFAULT_OPENROUTER_SCHEME_NAME = "deepseek-v4-flash"
+
+CEREBRAS_REASONING_SCHEMES = {
+    # qwen-3.8-27b -- Cerebras's own OpenAI-compatibility docs confirm
+    # none/low/medium/high are all valid, defaulting to high -- a
+    # straightforward 1:1 mapping, unlike Groq's per-model quirks.
+    "qwen-3.8-27b": {
+        "minimal": "none", "low": "low", "medium": "medium", "high": "high",
+    },
+}
+_DEFAULT_CEREBRAS_SCHEME_NAME = "qwen-3.8-27b"
+
+
+def _resolve_reasoning_effort(model_name: str, thinking_level: str, schemes: dict, default_scheme_name: str, provider_label: str):
+    """Generalized version of _resolve_groq_reasoning_effort -- substring-matches
+    model_name against `schemes` (checked in order) and returns that
+    family's reasoning_effort value for thinking_level, falling back to
+    schemes[default_scheme_name] with a startup log note for unrecognized
+    models. provider_label is just for the log line (e.g. "OPENROUTER_MODEL").
+    Runs at module-load time, before log() is defined -- plain print(), as
+    in _resolve_groq_reasoning_effort."""
+    model_lower = model_name.lower()
+    for family_substring, scheme in schemes.items():
+        if family_substring in model_lower:
+            return scheme[thinking_level]
+    print(
+        f"[Startup] ℹ️ {provider_label} '{model_name}' isn't in its reasoning-effort "
+        f"scheme table -- falling back to the '{default_scheme_name}' scheme. If this "
+        "model rejects that value, add a new entry for it.",
+        flush=True,
+    )
+    return schemes[default_scheme_name][thinking_level]
+
+
 THINKING_LEVEL = os.environ.get("THINKING_LEVEL", "low").strip().lower()
 _VALID_THINKING_LEVELS = ("minimal", "low", "medium", "high")
 if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
@@ -453,6 +551,15 @@ if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
 # ask_groq_for_answer's _call_groq() builds its kwargs dict conditionally
 # to handle that, rather than always passing this value straight through.
 GROQ_REASONING_EFFORT = _resolve_groq_reasoning_effort(GROQ_MODEL, THINKING_LEVEL)
+
+# Same idea for OpenRouter/Cerebras -- see OPENROUTER_REASONING_SCHEMES /
+# CEREBRAS_REASONING_SCHEMES and _resolve_reasoning_effort above.
+OPENROUTER_REASONING_EFFORT = _resolve_reasoning_effort(
+    OPENROUTER_MODEL, THINKING_LEVEL, OPENROUTER_REASONING_SCHEMES, _DEFAULT_OPENROUTER_SCHEME_NAME, "OPENROUTER_MODEL"
+)
+CEREBRAS_REASONING_EFFORT = _resolve_reasoning_effort(
+    CEREBRAS_MODEL, THINKING_LEVEL, CEREBRAS_REASONING_SCHEMES, _DEFAULT_CEREBRAS_SCHEME_NAME, "CEREBRAS_MODEL"
+)
 
 # Optional extra sentence appended to every prompt (both Groq and Gemini),
 # meant to nudge the model to read qualifying words/phrasing more carefully
@@ -689,6 +796,17 @@ _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 # or handshake happens here, so holding several is free). Indexed
 # round-robin by question number in ask_groq_for_answer.
 _groq_clients = [(name, Groq(api_key=key)) for name, key in GROQ_API_KEYS]
+
+# Both OpenAI-compatible -- reuse the Groq SDK class pointed at each
+# provider's base_url instead of pulling in a separate SDK dependency
+# (confirmed: groq.Groq(api_key=..., base_url=...) is otherwise a thin
+# OpenAI-compatible chat.completions wrapper, so this works cleanly).
+# None when the corresponding API key isn't set / provider isn't in use --
+# ask_openrouter_for_answer / ask_cerebras_for_answer are only ever called
+# when AI_PROVIDER selects them, and _fail_config above already guarantees
+# the key exists in that case, so a None client here is never dereferenced.
+_openrouter_client = Groq(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1") if OPENROUTER_API_KEY else None
+_cerebras_client = Groq(api_key=CEREBRAS_API_KEY, base_url="https://api.cerebras.ai/v1") if CEREBRAS_API_KEY else None
 
 _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in case
 
@@ -1086,12 +1204,143 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     )
 
 
+def _ask_openai_compatible_for_answer(
+    client, model: str, reasoning_effort, provider_label: str,
+    question_text: str, options: list[str], attempt_label: str,
+) -> str:
+    """
+    Shared implementation for ask_openrouter_for_answer and
+    ask_cerebras_for_answer -- both are single-account OpenAI-compatible
+    providers (no round-robin pool like Groq's 3 accounts), so this is
+    ask_groq_for_answer's body with `groq_client`/GROQ_MODEL/
+    GROQ_REASONING_EFFORT/"Groq" replaced by parameters. Kept as one
+    shared function rather than copy-pasting it a third time -- any bugfix
+    here covers both providers at once. provider_label is used in every
+    log() call and StageFailure message (e.g. "OpenRouter answer (...)").
+    reasoning_effort may be a string ("high", "none", etc.) -- always sent
+    here, unlike Groq's groq/compound case, since neither OPENROUTER_MODEL's
+    nor CEREBRAS_MODEL's scheme table has a None entry today. If a future
+    model on either provider needs to omit the parameter entirely, add a
+    None-valued scheme tier the same way GROQ_REASONING_SCHEMES["compound"]
+    does, and this function will need the same conditional-kwargs handling
+    ask_groq_for_answer already has.
+    """
+    valid_letters = _LETTERS[: len(options)]
+    prompt = _build_prompt(question_text, options)
+
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "quiz_answer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string", "enum": valid_letters},
+                },
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    def _call():
+        max_attempts = 3
+        last_error = None
+        kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_completion_tokens": 300,
+            "response_format": response_format,
+        }
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return client.chat.completions.create(**kwargs)
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts:
+                    # Loud, detailed failure logging is deliberate here --
+                    # see the CEREBRAS_API_KEY comment above (2026-09-11):
+                    # Cerebras's $5 trial credit / 30-day expiry means a
+                    # real billing/auth failure is a live possibility, not
+                    # just a hypothetical, and it should be unmistakable in
+                    # the log rather than blend in as a generic retry.
+                    log(
+                        f"{provider_label} answer ({attempt_label})",
+                        "INFO",
+                        f"API call failed ({e.__class__.__name__}: {_describe_groq_error(e)}), "
+                        f"retrying (attempt {attempt}/{max_attempts})",
+                    )
+                    time.sleep(0.5)
+        raise StageFailure(
+            f"{provider_label} answer ({attempt_label})",
+            f"{provider_label} API call failed after {max_attempts} attempts: "
+            f"{last_error.__class__.__name__}: {_describe_groq_error(last_error)}",
+        )
+
+    def _try_once():
+        resp = _call()
+        _log_groq_usage(resp, f"{provider_label} answer ({attempt_label})")
+        raw = (resp.choices[0].message.content or "").strip()
+        try:
+            parsed = json.loads(raw)
+            letter = str(parsed.get("answer", "")).strip().upper()
+        except Exception:
+            letter = ""
+        if letter not in valid_letters:
+            match = re.search(r"[A-F]", raw.upper())
+            letter = match.group(0) if match else None
+        return letter
+
+    letter = _try_once()
+    if letter in valid_letters:
+        log(f"{provider_label} answer ({attempt_label})", "OK", f"chose {letter}")
+        return letter
+
+    log(f"{provider_label} answer ({attempt_label})", "INFO", f"unparseable response '{letter}', retrying once")
+    letter = _try_once()
+    if letter in valid_letters:
+        log(f"{provider_label} answer ({attempt_label}, retry)", "OK", f"chose {letter}")
+        return letter
+
+    raise StageFailure(
+        f"{provider_label} answer ({attempt_label})",
+        f"could not get a valid option letter after retry (last raw value: {letter!r})",
+    )
+
+
+def ask_openrouter_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
+    """OpenRouter equivalent of ask_gemini_for_answer() / ask_groq_for_answer() --
+    see _ask_openai_compatible_for_answer for the shared implementation."""
+    return _ask_openai_compatible_for_answer(
+        _openrouter_client, OPENROUTER_MODEL, OPENROUTER_REASONING_EFFORT, "OpenRouter",
+        question_text, options, attempt_label,
+    )
+
+
+def ask_cerebras_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
+    """Cerebras equivalent of ask_gemini_for_answer() / ask_groq_for_answer() --
+    see _ask_openai_compatible_for_answer for the shared implementation."""
+    return _ask_openai_compatible_for_answer(
+        _cerebras_client, CEREBRAS_MODEL, CEREBRAS_REASONING_EFFORT, "Cerebras",
+        question_text, options, attempt_label,
+    )
+
+
 def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
     """Dispatches to whichever provider AI_PROVIDER selects. q_num (1-based)
     is only used by Groq, to round-robin across the configured accounts --
-    see ask_groq_for_answer."""
+    see ask_groq_for_answer. OpenRouter/Cerebras are single-account, so
+    q_num is unused for them."""
     if AI_PROVIDER == "groq":
         return ask_groq_for_answer(question_text, options, attempt_label, q_num)
+    if AI_PROVIDER == "openrouter":
+        return ask_openrouter_for_answer(question_text, options, attempt_label)
+    if AI_PROVIDER == "cerebras":
+        return ask_cerebras_for_answer(question_text, options, attempt_label)
     return ask_gemini_for_answer(question_text, options, attempt_label)
 
 
@@ -1359,18 +1608,24 @@ async def main():
     # reading the source. One log() call, no extra I/O or network access,
     # so this adds no latency -- purely printing values already resolved
     # above.
+    if AI_PROVIDER == "groq":
+        _provider_summary = (
+            f"GROQ_MODEL={GROQ_MODEL} reasoning_effort={GROQ_REASONING_EFFORT!r} "
+            f"groq_accounts={len(_groq_clients)} ({', '.join(name for name, _ in _groq_clients)})"
+        )
+    elif AI_PROVIDER == "openrouter":
+        _provider_summary = f"OPENROUTER_MODEL={OPENROUTER_MODEL} reasoning_effort={OPENROUTER_REASONING_EFFORT!r}"
+    elif AI_PROVIDER == "cerebras":
+        _provider_summary = f"CEREBRAS_MODEL={CEREBRAS_MODEL} reasoning_effort={CEREBRAS_REASONING_EFFORT!r}"
+    else:
+        _provider_summary = f"GEMINI_MODEL={GEMINI_MODEL}"
+
     log(
         "Startup config",
         "INFO",
         f"mode={'TEST MODE' if TEST_MODE else 'real mode'} | "
         f"AI_PROVIDER={AI_PROVIDER} | "
-        + (
-            f"GROQ_MODEL={GROQ_MODEL} reasoning_effort={GROQ_REASONING_EFFORT!r} "
-            f"groq_accounts={len(_groq_clients)} ({', '.join(name for name, _ in _groq_clients)})"
-            if AI_PROVIDER == "groq"
-            else f"GEMINI_MODEL={GEMINI_MODEL}"
-        )
-        + f" | THINKING_LEVEL={THINKING_LEVEL} | "
+        f"{_provider_summary} | THINKING_LEVEL={THINKING_LEVEL} | "
         f"START_QUIZ_CLICK_MODE={START_QUIZ_CLICK_MODE} ANSWER_CLICK_MODE={ANSWER_CLICK_MODE} | "
         f"PACING_CONFIG_NAME={PACING_CONFIG_NAME} | "
         f"SECTION_NOTES={SECTION_NOTES_NAME or '(none)'} | "
