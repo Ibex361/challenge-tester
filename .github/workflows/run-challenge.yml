@@ -83,13 +83,12 @@ on:
         type: string
         default: ""
       ai_provider:
-        description: "Which AI answers the quiz: groq (fast), gemini (fallback), openrouter (free, DeepSeek V4 Flash by default), or cerebras (free-trial credit, needs a card -- see CEREBRAS_API_KEY secret notes)"
+        description: "Which AI answers the quiz: groq (fast), gemini (fallback), or openrouter (free, DeepSeek V4 Flash by default)"
         type: choice
         options:
           - groq
           - gemini
           - openrouter
-          - cerebras
         default: groq
       groq_model:
         description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
@@ -97,10 +96,6 @@ on:
         default: ""
       openrouter_model:
         description: "OpenRouter model override (e.g. openai/gpt-oss-20b:free). Leave blank to use the script's default (deepseek/deepseek-v4-flash:free)."
-        type: string
-        default: ""
-      cerebras_model:
-        description: "Cerebras model override (e.g. llama-3.3-70b). Leave blank to use the script's default (qwen-3.8-27b)."
         type: string
         default: ""
       thinking_level:
@@ -306,17 +301,9 @@ jobs:
           GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
           GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
           GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
-          # OpenRouter and Cerebras: single account each (no round-robin
-          # pool like Groq's 3 keys) -- added 2026-09-11. NOTE on Cerebras
-          # (see run_challenge.py's CEREBRAS_API_KEY comment for full
-          # detail): this is a one-time $5 trial credit that requires a
-          # verified card and expires 30 days after being granted, NOT an
-          # ongoing free tier -- once it runs out, calls will start
-          # failing with a real billing/auth error. Failures are logged
-          # loudly (full error detail, not swallowed) specifically so
-          # that's visible in the run log rather than a silent stall.
+          # OpenRouter: single account (no round-robin pool like Groq's
+          # 3 keys) -- added 2026-09-11.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
           TEST_ACTIVATION_TIME_UTC: ${{ steps.convert_time.outputs.tester_utc_time }}
@@ -354,12 +341,6 @@ jobs:
             echo "Using OPENROUTER_MODEL override: $OPENROUTER_MODEL"
           else
             echo "No openrouter_model input given -- using the script's built-in default"
-          fi
-          if [ -n "${{ github.event.inputs.cerebras_model }}" ]; then
-            export CEREBRAS_MODEL="${{ github.event.inputs.cerebras_model }}"
-            echo "Using CEREBRAS_MODEL override: $CEREBRAS_MODEL"
-          else
-            echo "No cerebras_model input given -- using the script's built-in default"
           fi
           python run_challenge.py
 
