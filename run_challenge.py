@@ -1305,6 +1305,27 @@ def _ask_openai_compatible_for_answer(
     valid_letters = _LETTERS[: len(options)]
     prompt = _build_prompt(question_text, options)
 
+    # Shared between the main call below and _forced_guess()'s fallback
+    # call (see that function's docstring, 2026-09-11 fix) -- both need
+    # the SAME real budget, not two independently-chosen numbers that can
+    # silently drift apart. 600: confirmed live with
+    # nvidia/nemotron-3-super-120b-a12b:free at reasoning_effort="low" (the
+    # model's own lowest documented tier) that a longer/harder question (5
+    # confusable options embedded in the question text) still spent
+    # 251/300 tokens on hidden reasoning at the old 300 budget, leaving too
+    # little room to emit the actual JSON answer (finish_reason="length",
+    # caught by the truncation guard in _try_once() rather than silently
+    # mis-answering -- see that guard's comment). 600 gives roughly 2x that
+    # worst-case-seen reasoning spend plus headroom for the short JSON
+    # answer (~10-90 completion tokens observed elsewhere in this file's
+    # actual usage logs) -- not a guaranteed ceiling for every
+    # question/model combination, just evidence-based rather than guessed.
+    # If a future run still hits finish_reason="length" at this budget on
+    # the MAIN call, check real usage numbers from the existing
+    # _log_groq_usage line before raising further, per the existing
+    # open_questions guidance for this exact situation.
+    _MAX_COMPLETION_TOKENS = 600
+
     response_format = {
         "type": "json_schema",
         "json_schema": {
@@ -1328,24 +1349,7 @@ def _ask_openai_compatible_for_answer(
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
-            # 2026-09-11: raised from 300 -- confirmed live with
-            # nvidia/nemotron-3-super-120b-a12b:free at reasoning_effort=
-            # "low" (the model's own lowest documented tier) that a
-            # longer/harder question (5 confusable options embedded in the
-            # question text) still spent 251/300 tokens on hidden
-            # reasoning, leaving too little room to emit the actual JSON
-            # answer (finish_reason="length", caught by the truncation
-            # guard below rather than silently mis-answering -- see that
-            # guard's comment). 600 gives roughly 2x that worst-case-seen
-            # reasoning spend plus headroom for the short JSON answer
-            # (~10-90 completion tokens observed elsewhere in this file's
-            # actual usage logs) -- not a guaranteed ceiling for every
-            # question/model combination, just evidence-based rather than
-            # guessed. If a future run still hits finish_reason="length"
-            # at this budget, check real usage numbers from the existing
-            # _log_groq_usage line before raising further, per the
-            # existing open_questions guidance for this exact situation.
-            "max_completion_tokens": 600,
+            "max_completion_tokens": _MAX_COMPLETION_TOKENS,
             "response_format": response_format,
         }
         if reasoning_effort is not None:
@@ -1507,10 +1511,34 @@ def _ask_openai_compatible_for_answer(
         reasoning_effort override (let the model's own default apply
         rather than forcing another possibly-long reasoning pass), and an
         explicit instruction to guess immediately without reasoning at
-        length. max_completion_tokens is kept small on purpose -- a
-        genuine guess should be nearly instant; if the model tries to
-        reason at length again anyway, this caps the cost of that rather
-        than repeating the 600-token spend.
+        length.
+
+        FIXED 2026-09-11 (same day, after a live failure on this exact
+        path): originally used max_completion_tokens=40 on the theory that
+        a genuine guess should be nearly instant. Confirmed live that
+        assumption was wrong for this model -- it spent 38/40 tokens on
+        reasoning again (confirmed via _log_groq_usage) despite the
+        explicit "do not reason at length" instruction, leaving no room
+        for the actual letter, so the response was truncated AGAIN. The
+        old regex then blindly matched a stray 'A'-'F' character in that
+        truncated fragment and returned 'E' -- on a 4-option (A-D)
+        question, meaning it returned a NONEXISTENT option as if it were
+        a real guess. Root cause: this model appears unable to fully skip
+        its reasoning trace on command, so an artificially tiny budget
+        just guarantees truncation rather than producing a fast answer --
+        it needs realistic headroom to complete a (shorter, but still
+        real) reasoning pass. Raised to match the main call's budget
+        (same _MAX_COMPLETION_TOKENS constant) so a shorter reasoning
+        pass has room to actually finish this time; the two known
+        governing constraints from the analysis above (missing
+        information, not token budget) mean this still isn't guaranteed
+        to reach a real answer either, but 40 tokens never gave it a fair
+        chance to. Also fixed the regex itself: it now only accepts a
+        letter that's actually a valid option for THIS question
+        (`valid_letters`, matching the bound _try_once() already
+        respects), instead of any 'A'-'F' character regardless of how
+        many options this question actually has -- closes the exact gap
+        that let 'E' through on a 4-option question.
         """
         guess_prompt = (
             prompt
@@ -1523,7 +1551,7 @@ def _ask_openai_compatible_for_answer(
             "model": model,
             "messages": [{"role": "user", "content": guess_prompt}],
             "temperature": 0,
-            "max_completion_tokens": 40,
+            "max_completion_tokens": _MAX_COMPLETION_TOKENS,
         }
         try:
             resp = client.chat.completions.create(**kwargs)
@@ -1539,8 +1567,18 @@ def _ask_openai_compatible_for_answer(
         choice = resp.choices[0] if getattr(resp, "choices", None) else None
         message = getattr(choice, "message", None) if choice is not None else None
         raw = (message.content or "").strip() if message is not None else ""
-        match = re.search(r"[A-F]", raw.upper())
+        # Only accept a letter that's actually a valid option for THIS
+        # question -- previously accepted any bare 'A'-'F' character found
+        # anywhere in the raw text, which on a 4-option (A-D) question let
+        # a stray 'E' (not a real option) through as if it were a genuine
+        # guess. re.search still just takes the first candidate match, not
+        # necessarily the model's actual final answer if there's leftover
+        # reasoning text before it -- an accepted, known limitation shared
+        # with the main call's own fallback regex, not something this fix
+        # introduces.
+        match = re.search(r"[" + "".join(valid_letters) + "]", raw.upper())
         return match.group(0) if match else None
+
 
     letter = _try_once()
     if letter in valid_letters:
