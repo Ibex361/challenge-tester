@@ -35,6 +35,8 @@ from google import genai
 from google.genai import types as genai_types
 import groq
 from groq import Groq
+import openai
+from openai import OpenAI
 
 
 # ----------------------------------------------------------------------
@@ -797,16 +799,22 @@ _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 # round-robin by question number in ask_groq_for_answer.
 _groq_clients = [(name, Groq(api_key=key)) for name, key in GROQ_API_KEYS]
 
-# Both OpenAI-compatible -- reuse the Groq SDK class pointed at each
-# provider's base_url instead of pulling in a separate SDK dependency
-# (confirmed: groq.Groq(api_key=..., base_url=...) is otherwise a thin
-# OpenAI-compatible chat.completions wrapper, so this works cleanly).
-# None when the corresponding API key isn't set / provider isn't in use --
-# ask_openrouter_for_answer / ask_cerebras_for_answer are only ever called
-# when AI_PROVIDER selects them, and _fail_config above already guarantees
-# the key exists in that case, so a None client here is never dereferenced.
-_openrouter_client = Groq(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1") if OPENROUTER_API_KEY else None
-_cerebras_client = Groq(api_key=CEREBRAS_API_KEY, base_url="https://api.cerebras.ai/v1") if CEREBRAS_API_KEY else None
+# Both OpenAI-compatible -- but use the `openai` SDK here, NOT `Groq`.
+# Found 2026-09-11 (real run failure -- see run history): the `groq` SDK
+# hardcodes its request path as "/openai/v1/chat/completions" (confirmed
+# in groq/resources/chat/completions.py), which is Groq's own specific
+# routing, not a generic OpenAI-compatible path -- appending that to
+# OpenRouter's or Cerebras's base_url produces a URL that doesn't exist
+# on either of their servers (their real endpoints are just
+# "<base_url>/chat/completions", no "/openai/" segment), so every call
+# 404'd against OpenRouter's own not-found page. The `openai` SDK's
+# request path is the plain relative "/chat/completions", which merges
+# correctly with any base_url -- confirmed this produces exactly
+# "https://openrouter.ai/api/v1/chat/completions" and
+# "https://api.cerebras.ai/v1/chat/completions", matching each
+# provider's real documented endpoint.
+_openrouter_client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1") if OPENROUTER_API_KEY else None
+_cerebras_client = OpenAI(api_key=CEREBRAS_API_KEY, base_url="https://api.cerebras.ai/v1") if CEREBRAS_API_KEY else None
 
 _LETTERS = ["A", "B", "C", "D", "E", "F"]  # supports up to 6 options, just in case
 
@@ -1032,42 +1040,83 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
 
 def _describe_groq_error(e: Exception) -> str:
     """
-    Extracts the useful detail from a Groq SDK exception for logging --
-    specifically for RateLimitError (429/ITPM), where the parsed response
-    body already contains the full human-readable detail (limit/used/
-    requested numbers, retry hint, e.g. "Rate limit reached for model
-    `qwen/qwen3.6-27b` ... Limit 7000, Used 6032, Requested 2115. Please
-    try again in 9.8s") -- confirmed against the installed groq==1.7.0
-    source: APIStatusError.body is json.loads() of the response text when
-    it's valid JSON, same shape Groq's own dashboard shows. Prefers
-    body["message"] (the clean sentence) over e.message (which wraps it as
-    "Error code: 429 - {the whole dict}") when available. Falls back to
-    str(e) for any exception type that doesn't carry this structure
-    (network errors, timeouts, etc.), so this is always safe to call.
-    Added 2026-09-07 after having to manually check groq.com's own
-    console to get this same detail for a real ITPM incident -- now it's
-    in the run's own log instead.
+    Extracts the useful detail from a Groq/OpenAI-compatible-SDK exception
+    for logging -- specifically for RateLimitError (429/ITPM), where the
+    parsed response body already contains the full human-readable detail
+    (limit/used/requested numbers, retry hint, e.g. "Rate limit reached for
+    model `qwen/qwen3.6-27b` ... Limit 7000, Used 6032, Requested 2115.
+    Please try again in 9.8s") -- confirmed against the installed
+    groq==1.7.0 source: APIStatusError.body is json.loads() of the response
+    text when it's valid JSON, same shape Groq's own dashboard shows.
+    Prefers body["message"] (the clean sentence) over e.message (which
+    wraps it as "Error code: 429 - {the whole dict}") when available.
+
+    Despite the name, this also handles openai.APIStatusError (used by
+    ask_openrouter_for_answer / ask_cerebras_for_answer via the `openai`
+    SDK, not `groq` -- see _openrouter_client/_cerebras_client comment) --
+    both SDKs use the same APIStatusError(message, response, body) shape,
+    so one function covers both rather than needing a near-identical
+    twin. Kept the original name rather than renaming everywhere it's
+    called, since it was already in wide use before openai support existed.
+
+    HTML-body guard added 2026-09-11: a routing/URL mistake (see
+    _openrouter_client fix) sent requests to a URL that doesn't exist on
+    OpenRouter's servers, which correctly raised a NotFoundError -- but
+    its body was OpenRouter's own HTML 404 page (a few KB of <script>
+    tags), not a JSON error. Neither .body nor .message filters that out
+    on their own (.message wraps the raw body verbatim), so a real one
+    ended up dumped whole into a run's summary log. Anything that isn't a
+    dict AND doesn't look like a short plain-text message now gets
+    truncated with a note instead of reproduced in full -- still enough
+    to recognize "this was a 404 / wrong URL" from the log without a wall
+    of markup, and str(e) is never returned unguarded any more.
+
+    Falls back to a short str(e) (also truncated) for any exception type
+    that doesn't carry this structure (network errors, timeouts, etc.),
+    so this is always safe to call. Added 2026-09-07 after having to
+    manually check groq.com's own console to get this same detail for a
+    real ITPM incident -- now it's in the run's own log instead.
     """
-    if isinstance(e, groq.APIStatusError):
+    _MAX_LEN = 500
+
+    def _clean(text) -> str:
+        text = str(text)
+        looks_like_markup = "<script" in text or "<!DOCTYPE" in text or "<html" in text.lower()
+        if looks_like_markup or len(text) > _MAX_LEN:
+            return text[:_MAX_LEN] + f"... [truncated, {len(text)} chars total -- looks like an HTML/error page, not a structured API error; check the URL/base_url being used]"
+        return text
+
+    if isinstance(e, (groq.APIStatusError, openai.APIStatusError)):
         if isinstance(e.body, dict) and "message" in e.body:
             code = e.body.get("code")
-            return e.body["message"] + (f" [code={code}]" if code else "")
-        return e.message
-    return str(e)
+            return _clean(e.body["message"]) + (f" [code={code}]" if code else "")
+        return _clean(e.message)
+    return _clean(str(e))
 
 
-def _log_groq_usage(resp, attempt_label: str) -> None:
+def _log_groq_usage(resp, stage: str) -> None:
     """
-    Logs actual token usage from a Groq response -- prompt/completion/total,
-    plus a reasoning-token breakdown when Groq's API actually returns one
-    (as of this writing that field is inconsistently populated for
-    reasoning models like gpt-oss-20b, sometimes 0 even when real reasoning
-    happened -- see https://community.groq.com/t/gpt-oss-120b-reasoning-tokens-not-counted-in-responses-api-usage-statistics/555,
+    Logs actual token usage from a Groq/OpenAI-compatible-SDK response --
+    prompt/completion/total, plus a reasoning-token breakdown when the API
+    actually returns one (as of this writing that field is inconsistently
+    populated for reasoning models like gpt-oss-20b, sometimes 0 even when
+    real reasoning happened -- see
+    https://community.groq.com/t/gpt-oss-120b-reasoning-tokens-not-counted-in-responses-api-usage-statistics/555,
     so this only reports it when present rather than assuming it's
     accurate). This is purely observational -- doesn't affect answering
     logic -- added to see real-world token spend per question, e.g. when
     sizing max_completion_tokens or estimating the cost of adding extra
     context (like a video transcript) to the prompt.
+
+    `stage` is the FULL, already-formatted log stage string to use as-is
+    (e.g. "Groq answer (Question 1/5)" or "OpenRouter answer (Question 1/5)")
+    -- NOT just the attempt_label, unlike this function's original Groq-
+    only version, which hardcoded a "Groq answer (...)" wrapper around
+    whatever it was given. Fixed 2026-09-11: _ask_openai_compatible_for_answer
+    was passing an already-wrapped "OpenRouter answer (Question 3/5)"
+    string into that old hardcoded wrapper, producing a doubled-up log
+    line ("Groq answer (OpenRouter answer (Question 3/5))"). Callers now
+    pass the exact stage string they want logged.
     """
     usage = getattr(resp, "usage", None)
     if usage is None:
@@ -1083,7 +1132,7 @@ def _log_groq_usage(resp, attempt_label: str) -> None:
     parts = [f"prompt={prompt_toks}", f"completion={completion_toks}", f"total={total_toks}"]
     if reasoning_toks is not None:
         parts.append(f"reasoning={reasoning_toks}")
-    log(f"Groq answer ({attempt_label})", "INFO", f"token usage -- {', '.join(parts)}")
+    log(stage, "INFO", f"token usage -- {', '.join(parts)}")
 
 
 def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
@@ -1173,7 +1222,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
 
     def _try_once():
         resp = _call_groq()
-        _log_groq_usage(resp, attempt_label)
+        _log_groq_usage(resp, f"Groq answer ({attempt_label})")
         raw = (resp.choices[0].message.content or "").strip()
         try:
             parsed = json.loads(raw)
