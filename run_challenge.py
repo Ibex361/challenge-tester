@@ -1476,25 +1476,115 @@ def _ask_openai_compatible_for_answer(
                     f"-- treating as unparseable rather than scanning it for a "
                     f"letter (raw content: {raw[:200]!r})",
                 )
-                return None
+                return "__TRUNCATED__"
             match = re.search(r"[A-F]", raw.upper())
             letter = match.group(0) if match else None
         return letter
+
+    def _forced_guess():
+        """
+        Last-resort fallback for when the model's reasoning genuinely never
+        reaches an answer -- confirmed 2026-09-11 with
+        nvidia/nemotron-3-super-120b-a12b:free on a question whose fact
+        wasn't covered by the attached SECTION_NOTES (its own reasoning
+        trace showed it explicitly searching for a fact it didn't have:
+        "We need to recall the video content..."). In that situation,
+        raising max_completion_tokens further doesn't help -- confirmed
+        live that two full-budget attempts (600/600 tokens, 454 then 466
+        spent on reasoning, both truncated) produced the SAME stuck
+        reasoning trace almost verbatim, since the actual constraint is
+        missing information, not token budget. Retrying identically a
+        second time (the previous behavior) was pure wasted time -- same
+        prompt, same missing fact, same stuck result, every time.
+        Per explicit user preference: when the model doesn't know, it
+        should still commit to its single best guess rather than fail the
+        whole quiz run -- a wrong guess is an acceptable quiz outcome here
+        (same as a human guessing on a question they don't know), an
+        unhandled run failure is not. This call is deliberately DIFFERENT
+        from the normal one, not a repeat of it: no response_format (the
+        strict JSON schema is exactly what a model with nothing to say
+        struggles to fill, and isn't needed for one bare letter), no
+        reasoning_effort override (let the model's own default apply
+        rather than forcing another possibly-long reasoning pass), and an
+        explicit instruction to guess immediately without reasoning at
+        length. max_completion_tokens is kept small on purpose -- a
+        genuine guess should be nearly instant; if the model tries to
+        reason at length again anyway, this caps the cost of that rather
+        than repeating the 600-token spend.
+        """
+        guess_prompt = (
+            prompt
+            + "\n\nYou were unable to reach a confident answer on a prior "
+            "attempt. Do not reason at length or explain -- you must "
+            "still respond with exactly one letter, your single best "
+            "guess. Respond with ONLY that letter now."
+        )
+        kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": guess_prompt}],
+            "temperature": 0,
+            "max_completion_tokens": 40,
+        }
+        try:
+            resp = client.chat.completions.create(**kwargs)
+        except Exception as e:
+            log(
+                f"{provider_label} answer ({attempt_label}, forced guess)",
+                "INFO",
+                f"forced-guess call itself failed ({e.__class__.__name__}: "
+                f"{_describe_groq_error(e)})",
+            )
+            return None
+        _log_groq_usage(resp, f"{provider_label} answer ({attempt_label}, forced guess)")
+        choice = resp.choices[0] if getattr(resp, "choices", None) else None
+        message = getattr(choice, "message", None) if choice is not None else None
+        raw = (message.content or "").strip() if message is not None else ""
+        match = re.search(r"[A-F]", raw.upper())
+        return match.group(0) if match else None
 
     letter = _try_once()
     if letter in valid_letters:
         log(f"{provider_label} answer ({attempt_label})", "OK", f"chose {letter}")
         return letter
 
-    log(f"{provider_label} answer ({attempt_label})", "INFO", f"unparseable response '{letter}', retrying once")
-    letter = _try_once()
+    if letter == "__TRUNCATED__":
+        # Don't retry the identical request -- see _forced_guess() docstring.
+        # Go straight to a deliberately different, short, no-schema guess
+        # call instead of repeating the same stuck reasoning a second time.
+        log(
+            f"{provider_label} answer ({attempt_label})",
+            "INFO",
+            "response was truncated by reasoning with no answer reached -- "
+            "skipping an identical retry and making one forced-guess call instead",
+        )
+    else:
+        log(f"{provider_label} answer ({attempt_label})", "INFO", f"unparseable response '{letter}', retrying once")
+        letter = _try_once()
+        if letter in valid_letters:
+            log(f"{provider_label} answer ({attempt_label}, retry)", "OK", f"chose {letter}")
+            return letter
+        if letter == "__TRUNCATED__":
+            log(
+                f"{provider_label} answer ({attempt_label}, retry)",
+                "INFO",
+                "retry also truncated by reasoning with no answer reached -- "
+                "making one forced-guess call instead of trying a third identical time",
+            )
+
+    letter = _forced_guess()
     if letter in valid_letters:
-        log(f"{provider_label} answer ({attempt_label}, retry)", "OK", f"chose {letter}")
+        log(
+            f"{provider_label} answer ({attempt_label}, forced guess)",
+            "OK",
+            f"chose {letter} (model could not reach a confident answer -- "
+            "this is its best guess, not a confident answer)",
+        )
         return letter
 
     raise StageFailure(
         f"{provider_label} answer ({attempt_label})",
-        f"could not get a valid option letter after retry (last raw value: {letter!r})",
+        f"could not get a valid option letter, including from a forced-guess "
+        f"fallback (last raw value: {letter!r})",
     )
 
 
