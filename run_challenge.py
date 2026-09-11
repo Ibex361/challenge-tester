@@ -108,22 +108,57 @@ def _fail_config(stage: str, detail: str):
 API_ID = int(os.environ["TG_API_ID"])
 API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-# Three separate Groq accounts (separate orgs -> separate ITPM quotas),
-# used round-robin across the quiz's questions so no single account's
-# rate limit is hit by 5 rapid-fire calls each carrying the full
-# SECTION_NOTES block (~2000+ input tokens/call). Replaces the old
-# single GROQ_API_KEY -- only required if AI_PROVIDER=groq.
-GROQ_API_KEYS = [
-    (name, key)
-    for name, key in (
-        ("GROQ_API_KEY_1", os.environ.get("GROQ_API_KEY_1")),
-        ("GROQ_API_KEY_2", os.environ.get("GROQ_API_KEY_2")),
-        ("GROQ_API_KEY_3", os.environ.get("GROQ_API_KEY_3")),
-    )
-    if key
-]
+
+def _load_round_robin_keys(prefix: str, count: int, legacy_env_name: str = None) -> list[tuple[str, str]]:
+    """
+    Builds an ordered [(name, key), ...] list of up to `count` API keys for
+    a provider's round-robin pool, from env vars named <prefix>_1.._<count>
+    (e.g. GROQ_API_KEY_1..5). Missing/blank slots are skipped, not padded --
+    e.g. only <prefix>_1 and <prefix>_3 set still gives a valid 2-key pool,
+    round-robin'd (q_num - 1) % len(pool) same as a full pool.
+
+    legacy_env_name: if given and that env var is set, it's included as an
+    extra entry (named legacy_env_name itself) ahead of the numbered ones --
+    lets an existing single-key secret (e.g. GEMINI_API_KEY) keep working
+    unchanged as account #1 when someone adds GEMINI_API_KEY_2.. for the
+    round-robin pool, rather than forcing a rename/migration.
+    """
+    keys = []
+    if legacy_env_name:
+        legacy_value = os.environ.get(legacy_env_name)
+        if legacy_value:
+            keys.append((legacy_env_name, legacy_value))
+    for i in range(1, count + 1):
+        name = f"{prefix}_{i}"
+        value = os.environ.get(name)
+        if value:
+            keys.append((name, value))
+    return keys
+
+
+# Multiple separate accounts per provider (separate orgs -> separate rate
+# quotas), used round-robin across the quiz's questions by question number
+# so no single account's rate limit is hit by 5 rapid-fire calls each
+# carrying the full SECTION_NOTES block (~2000+ input tokens/call). See
+# _load_round_robin_keys() above and ask_groq_for_answer()/
+# ask_gemini_for_answer() below for how q_num picks the account.
+#
+# Groq: originally 3 accounts (GROQ_API_KEY_1/2/3), expanded to 5
+# (GROQ_API_KEY_1..5) for extra ITPM headroom -- only required if
+# AI_PROVIDER=groq, and only as many keys as are actually set are used
+# (e.g. running with just 3 set still works, round-robin'd across 3).
+GROQ_API_KEYS = _load_round_robin_keys("GROQ_API_KEY", 5)
+
+# Gemini: same round-robin pattern as Groq, added so any provider can use
+# multiple accounts, not just Groq. GEMINI_API_KEY (no suffix) is kept as
+# the always-required base key -- it's included as account #1 automatically
+# via legacy_env_name, so existing setups with only GEMINI_API_KEY keep
+# working unchanged (a 1-account "pool"). Add GEMINI_API_KEY_2..5 to spread
+# load across more accounts; only required if AI_PROVIDER=gemini.
+GEMINI_API_KEYS = _load_round_robin_keys("GEMINI_API_KEY", 5, legacy_env_name="GEMINI_API_KEY")
+if not GEMINI_API_KEYS:
+    _fail_config("Startup config", "GEMINI_API_KEY must be set (GEMINI_API_KEY_2..5 are optional extra round-robin accounts).")
 
 # OpenRouter: added 2026-09-11 as another free-tier option alongside
 # Groq/Gemini. Exposes an OpenAI-compatible chat.completions endpoint, so
@@ -142,7 +177,7 @@ _VALID_AI_PROVIDERS = ("groq", "gemini", "openrouter")
 if AI_PROVIDER not in _VALID_AI_PROVIDERS:
     _fail_config("Startup config", f"AI_PROVIDER must be one of {_VALID_AI_PROVIDERS}, got {AI_PROVIDER!r}")
 if AI_PROVIDER == "groq" and not GROQ_API_KEYS:
-    _fail_config("Startup config", "AI_PROVIDER=groq requires at least one of GROQ_API_KEY_1/2/3 to be set.")
+    _fail_config("Startup config", "AI_PROVIDER=groq requires at least one of GROQ_API_KEY_1..5 to be set.")
 if AI_PROVIDER == "openrouter" and not OPENROUTER_API_KEY:
     _fail_config("Startup config", "AI_PROVIDER=openrouter requires OPENROUTER_API_KEY to be set.")
 
@@ -783,12 +818,11 @@ def today_utc_at(hh_mm_or_hhmmss: str) -> datetime:
 # Gemini / Groq: ask which option letter is correct, with strict output + retry
 # ----------------------------------------------------------------------
 
-_gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-
-# One Groq client per configured key, built once at import time (a Groq
-# client is just a thin HTTP wrapper around an API key -- no connection
-# or handshake happens here, so holding several is free). Indexed
-# round-robin by question number in ask_groq_for_answer.
+# One client per configured key, built once at import time (a thin HTTP
+# wrapper around an API key -- no connection/handshake happens here, so
+# holding several is free). Indexed round-robin by question number in
+# ask_gemini_for_answer / ask_groq_for_answer.
+_gemini_clients = [(name, genai.Client(api_key=key)) for name, key in GEMINI_API_KEYS]
 _groq_clients = [(name, Groq(api_key=key)) for name, key in GROQ_API_KEYS]
 
 # OpenAI-compatible -- but uses the `openai` SDK here, NOT `Groq`.
@@ -926,11 +960,21 @@ def _gemini_finish_reason(resp) -> str:
     return "unknown"
 
 
-def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label: str) -> str:
+def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
     """
     Returns the chosen option letter (e.g. "B"). Raises StageFailure if the
     model output can't be parsed into a valid option even after retry.
+
+    q_num (1-based question number) picks which of the configured Gemini
+    accounts handles this call, round-robin (q_num - 1) % len(_gemini_clients)
+    -- same pattern as ask_groq_for_answer's account round-robin. With only
+    GEMINI_API_KEY set (no _2../_5 extras), this is a 1-account pool and
+    every question uses the same client, unchanged from before.
     """
+    key_name, gemini_client = _gemini_clients[(q_num - 1) % len(_gemini_clients)]
+    if len(_gemini_clients) > 1:
+        log(f"Gemini answer ({attempt_label})", "INFO", f"using {key_name}")
+
     valid_letters = _LETTERS[: len(options)]
 
     # thinking_level is tunable via THINKING_LEVEL (default "minimal" was
@@ -981,7 +1025,7 @@ def ask_gemini_for_answer(question_text: str, options: list[str], attempt_label:
         last_error = None
         for attempt in range(1, max_attempts + 1):
             try:
-                return _gemini_client.models.generate_content(
+                return gemini_client.models.generate_content(
                     model=GEMINI_MODEL,
                     contents=prompt,
                     config=generation_config,
@@ -1595,14 +1639,14 @@ def ask_openrouter_for_answer(question_text: str, options: list[str], attempt_la
 
 def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
     """Dispatches to whichever provider AI_PROVIDER selects. q_num (1-based)
-    is only used by Groq, to round-robin across the configured accounts --
-    see ask_groq_for_answer. OpenRouter is single-account, so q_num is
-    unused for it."""
+    is used by Groq and Gemini to round-robin across each provider's
+    configured accounts -- see ask_groq_for_answer / ask_gemini_for_answer.
+    OpenRouter is single-account, so q_num is unused for it."""
     if AI_PROVIDER == "groq":
         return ask_groq_for_answer(question_text, options, attempt_label, q_num)
     if AI_PROVIDER == "openrouter":
         return ask_openrouter_for_answer(question_text, options, attempt_label)
-    return ask_gemini_for_answer(question_text, options, attempt_label)
+    return ask_gemini_for_answer(question_text, options, attempt_label, q_num)
 
 
 # ----------------------------------------------------------------------
@@ -1877,7 +1921,10 @@ async def main():
     elif AI_PROVIDER == "openrouter":
         _provider_summary = f"OPENROUTER_MODEL={OPENROUTER_MODEL} reasoning_effort={OPENROUTER_REASONING_EFFORT!r}"
     else:
-        _provider_summary = f"GEMINI_MODEL={GEMINI_MODEL}"
+        _provider_summary = (
+            f"GEMINI_MODEL={GEMINI_MODEL} "
+            f"gemini_accounts={len(_gemini_clients)} ({', '.join(name for name, _ in _gemini_clients)})"
+        )
 
     log(
         "Startup config",

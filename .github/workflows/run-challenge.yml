@@ -311,17 +311,30 @@ jobs:
           # account automatically implies its matching pacing file (no
           # separate selector).
           PACING_CONFIG_NAME: ${{ steps.resolve_account.outputs.account }}
+          # GEMINI_API_KEY is always required (account #1). GEMINI_API_KEY_2..5
+          # are optional extra accounts (separate orgs/quotas) -- if set,
+          # run_challenge.py round-robins across all of them by question
+          # number, same pattern as Groq's pool below. Leave 2..5 unset for
+          # the old single-account behavior, unchanged.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # 3 separate Groq accounts (separate orgs/ITPM quotas), round-
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+          # 5 separate Groq accounts (separate orgs/ITPM quotas), round-
           # robin'd across the 5 questions by run_challenge.py so no
           # single account's rate limit is hit by rapid-fire calls that
-          # each carry the full SECTION_NOTES block. Replaces the old
-          # single GROQ_API_KEY secret.
+          # each carry the full SECTION_NOTES block. Expanded from 3 to 5
+          # for extra headroom -- only as many as are actually set in
+          # secrets are used (e.g. just 1-3 set still works, round-robin'd
+          # across 3).
           GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
           GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
           GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
-          # OpenRouter: single account (no round-robin pool like Groq's
-          # 3 keys) -- added 2026-09-11.
+          GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+          GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
+          # OpenRouter: single account (no round-robin pool like Groq's/
+          # Gemini's) -- added 2026-09-11.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
