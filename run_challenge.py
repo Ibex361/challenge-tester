@@ -1328,14 +1328,31 @@ def _ask_openai_compatible_for_answer(
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
-            "max_completion_tokens": 300,
+            # 2026-09-11: raised from 300 -- confirmed live with
+            # nvidia/nemotron-3-super-120b-a12b:free at reasoning_effort=
+            # "low" (the model's own lowest documented tier) that a
+            # longer/harder question (5 confusable options embedded in the
+            # question text) still spent 251/300 tokens on hidden
+            # reasoning, leaving too little room to emit the actual JSON
+            # answer (finish_reason="length", caught by the truncation
+            # guard below rather than silently mis-answering -- see that
+            # guard's comment). 600 gives roughly 2x that worst-case-seen
+            # reasoning spend plus headroom for the short JSON answer
+            # (~10-90 completion tokens observed elsewhere in this file's
+            # actual usage logs) -- not a guaranteed ceiling for every
+            # question/model combination, just evidence-based rather than
+            # guessed. If a future run still hits finish_reason="length"
+            # at this budget, check real usage numbers from the existing
+            # _log_groq_usage line before raising further, per the
+            # existing open_questions guidance for this exact situation.
+            "max_completion_tokens": 600,
             "response_format": response_format,
         }
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
         for attempt in range(1, max_attempts + 1):
             try:
-                return client.chat.completions.create(**kwargs)
+                resp = client.chat.completions.create(**kwargs)
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts:
@@ -1352,10 +1369,48 @@ def _ask_openai_compatible_for_answer(
                         f"retrying (attempt {attempt}/{max_attempts})",
                     )
                     time.sleep(0.5)
+                continue
+            # Defensive: confirmed 2026-09-11 with
+            # nvidia/nemotron-3-super-120b-a12b:free -- a transient
+            # upstream provider outage ("Upstream error from Nvidia:
+            # Service temporarily overloaded", HTTP 502) came back as a
+            # "successful" ChatCompletion object (no exception raised, so
+            # the except block above never saw it) with choices=None and
+            # an `error` dict attached instead. This is OpenRouter's own
+            # in-band error-reporting shape for upstream failures, distinct
+            # from the "model doesn't support structured output" case
+            # handled in _try_once() below (that one has choices=None too,
+            # but no `error` field -- kept as two separate, distinctly-
+            # logged cases rather than merging them, since one is a
+            # transient infrastructure problem worth retrying here and the
+            # other is a model-capability problem retrying won't fix).
+            # Caught here (inside _call()'s own short-backoff retry loop)
+            # rather than left to surface all the way out to _try_once()'s
+            # two-attempt answer-retry logic, so a one-off 502 doesn't
+            # burn through the entire outer retry budget (which exists for
+            # genuinely unparseable answers, not infrastructure hiccups)
+            # before a short, well-suited backoff even gets a chance to
+            # resolve it.
+            resp_error = getattr(resp, "error", None)
+            if resp_error:
+                last_error = RuntimeError(
+                    resp_error.get("message", str(resp_error))
+                    if isinstance(resp_error, dict) else str(resp_error)
+                )
+                if attempt < max_attempts:
+                    log(
+                        f"{provider_label} answer ({attempt_label})",
+                        "INFO",
+                        f"upstream provider error in response body ({last_error}), "
+                        f"retrying (attempt {attempt}/{max_attempts})",
+                    )
+                    time.sleep(0.5)
+                continue
+            return resp
         raise StageFailure(
             f"{provider_label} answer ({attempt_label})",
             f"{provider_label} API call failed after {max_attempts} attempts: "
-            f"{last_error.__class__.__name__}: {_describe_groq_error(last_error)}",
+            f"{last_error.__class__.__name__}: {last_error if isinstance(last_error, RuntimeError) else _describe_groq_error(last_error)}",
         )
 
     def _try_once():
@@ -1370,7 +1425,12 @@ def _ask_openai_compatible_for_answer(
         # TypeError: 'NoneType' object is not subscriptable at
         # resp.choices[0].message. Treat that the same as any other
         # unparseable response -- log it and let the existing one-retry
-        # logic below handle it, rather than raising.
+        # logic below handle it, rather than raising. (A transient
+        # upstream-outage variant of this same empty-choices shape is now
+        # caught and retried earlier, inside _call() above, before it ever
+        # reaches here -- so anything still hitting this branch is a
+        # genuine model/response-format incompatibility, not a one-off
+        # provider hiccup.)
         choice = resp.choices[0] if getattr(resp, "choices", None) else None
         message = getattr(choice, "message", None) if choice is not None else None
         if message is None:
