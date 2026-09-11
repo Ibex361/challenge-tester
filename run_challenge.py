@@ -1333,7 +1333,27 @@ def _ask_openai_compatible_for_answer(
     def _try_once():
         resp = _call()
         _log_groq_usage(resp, f"{provider_label} answer ({attempt_label})")
-        raw = (resp.choices[0].message.content or "").strip()
+        # Defensive: some OpenRouter/Cerebras models (confirmed 2026-09-11
+        # with nvidia/nemotron-3-super-120b-a12b:free) don't actually
+        # support strict json_schema response_format -- instead of a clean
+        # 4xx error, they can come back with an empty/malformed choices
+        # list (resp.choices == [] or resp.choices[0] is None), which
+        # previously crashed the whole run with an unhandled
+        # TypeError: 'NoneType' object is not subscriptable at
+        # resp.choices[0].message. Treat that the same as any other
+        # unparseable response -- log it and let the existing one-retry
+        # logic below handle it, rather than raising.
+        choice = resp.choices[0] if getattr(resp, "choices", None) else None
+        message = getattr(choice, "message", None) if choice is not None else None
+        if message is None:
+            log(
+                f"{provider_label} answer ({attempt_label})",
+                "INFO",
+                f"response had no usable choices/message (model may not support "
+                f"structured JSON output) -- raw response: {str(resp)[:500]!r}",
+            )
+            return None
+        raw = (message.content or "").strip()
         try:
             parsed = json.loads(raw)
             letter = str(parsed.get("answer", "")).strip().upper()
