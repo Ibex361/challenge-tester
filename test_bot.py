@@ -839,6 +839,47 @@ SECTION_8_QUIZ = [
     },
 ]
 
+# -- Real challenge-bot questions for Section 9 (Account Types), captured
+# live from an actual challenge run (2026-09-11) and confirmed against the
+# bot's own "CORRECT ANSWERS" summary message (screenshot), not guessed.
+# All 5 questions use the real bot's full-option-text button style (no
+# bare-letter questions in this run, unlike section_6_quiz/section_8_quiz).
+# NAMING (per the 2026-09-06 convention): "quizN" is reserved for synthetic
+# quizzes NOT sourced from a live challenge; this is SECTION_9_QUIZ /
+# "section_9_quiz", not "quiz7".
+SECTION_9_QUIZ = [
+    {
+        "text": "Which is not a Market Difference between Demo and Real account?",
+        "options": ["Slippage", "Spread Variablity", "Greed", "Execution Speed"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "Which acct is better for Beginners to get real acct experiance",
+        "options": ["Standard", "Pro", "Cent", "ECN"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "which is True about Cent/Micro Accounts",
+        "options": ["High Deposit requirment", "Spread is usually lower", "More Slippage", "Low Spread Variablity"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "what is the smallest contact size we can hold in currency pairs considering all types of trading accounts",
+        "options": ["1000 Unit", "100000 Unit", "10000 Uinit", "10 Unit"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+    {
+        "text": "Which Accts are considered Better For Scalping from the others",
+        "options": ["Standard", "Pro", "Cent", "ECN"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
@@ -856,6 +897,7 @@ QUIZ_SESSIONS = {
     "cla_8c": CLA_8C,
     "cla_8d": CLA_8D,
     "section_8_quiz": SECTION_8_QUIZ,
+    "section_9_quiz": SECTION_9_QUIZ,
 }
 
 TOTAL_QUESTIONS = 5
