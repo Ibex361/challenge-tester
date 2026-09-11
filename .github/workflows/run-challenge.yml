@@ -8,7 +8,9 @@ on:
   # for you in the background -- no need to run "Run Test Bot" separately
   # anymore. Two activation-time inputs stay separate on purpose (test bot
   # vs. tester); the tester's field just pre-fills from the bot's field by
-  # default, and you can still override it.
+  # default, and you can still override it. Leaving the test bot's field
+  # blank defaults it to right now (EAT) -- see the "Resolve test bot
+  # activation time" step.
   workflow_dispatch:
     inputs:
       account:
@@ -23,7 +25,7 @@ on:
         type: boolean
         default: false
       test_bot_activation_time_eat:
-        description: "Test mode only: activation time for the TEST BOT itself (HH:MM, East Africa Time / UTC+3) -- /start is rejected before this"
+        description: "Test mode only: activation time for the TEST BOT itself (HH:MM, East Africa Time / UTC+3) -- /start is rejected before this. Leave blank to start right now."
         type: string
         default: ""
       test_bot_run_minutes:
@@ -156,15 +158,32 @@ jobs:
             echo "::error::challenge_number is required unless test_mode is checked."
             exit 1
           fi
-          if [ "${{ github.event.inputs.test_mode }}" == "true" ] && [ -z "${{ github.event.inputs.test_bot_activation_time_eat }}" ]; then
-            echo "::error::test_bot_activation_time_eat is required when test_mode is checked."
-            exit 1
+          # test_bot_activation_time_eat is no longer required -- see the
+          # "Resolve test bot activation time" step below, which defaults
+          # it to right now (EAT) when left blank.
+
+      - name: Resolve test bot activation time (defaults to now)
+        id: resolve_bot_time
+        run: |
+          bot_time="${{ github.event.inputs.test_bot_activation_time_eat }}"
+          if [ -z "$bot_time" ]; then
+            # EAT is a fixed UTC+3 year-round (no DST) -- computing "now in
+            # EAT" is just adding 3 hours to UTC now, no timezone database
+            # needed, same assumption the EAT->UTC conversion step below
+            # already relies on. Matches today_utc_at()'s existing same-
+            # UTC-calendar-day limitation (documented elsewhere in this
+            # repo) -- fine for manual test-mode triggers, which this is.
+            bot_time=$(python3 -c "import datetime; n=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=3); print(f'{n.hour:02d}:{n.minute:02d}')")
+            echo "test_bot_activation_time_eat left blank -- defaulting to right now ($bot_time EAT)"
+          else
+            echo "Using explicitly-provided test bot activation time ($bot_time EAT)"
           fi
+          echo "bot_time_eat=$bot_time" >> "$GITHUB_OUTPUT"
 
       - name: Resolve tester activation time (defaults to test bot's time)
         id: resolve_tester_time
         run: |
-          bot_time="${{ github.event.inputs.test_bot_activation_time_eat }}"
+          bot_time="${{ steps.resolve_bot_time.outputs.bot_time_eat }}"
           tester_time="${{ github.event.inputs.test_activation_time_eat }}"
           if [ -z "$tester_time" ]; then
             tester_time="$bot_time"
@@ -179,7 +198,7 @@ jobs:
         run: |
           # EAT is a fixed UTC+3 year-round (no DST), so a flat 3-hour
           # subtraction is always correct -- no timezone database needed.
-          bot_eat="${{ github.event.inputs.test_bot_activation_time_eat }}"
+          bot_eat="${{ steps.resolve_bot_time.outputs.bot_time_eat }}"
           if [ -n "$bot_eat" ]; then
             bot_utc=$(python3 -c "h,m=map(int,'$bot_eat'.split(':')); t=(h*60+m-180)%1440; print(f'{t//60:02d}:{t%60:02d}')")
             echo "Converted test bot activation time $bot_eat EAT -> $bot_utc UTC"
