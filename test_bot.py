@@ -69,6 +69,20 @@ TEST_CHANNEL_ID = os.environ.get("TEST_CHANNEL_ID")
 TEST_ADMIN_USER_ID = os.environ.get("TEST_ADMIN_USER_ID")
 TEST_BOT_USERNAME = os.environ.get("TEST_BOT_USERNAME", "birrforex_challenge_test_bot")
 
+# Purely cosmetic -- shown in the final "Challenge complete" score message
+# so a test run's log/screenshot is self-describing (which AI answered it)
+# without cross-referencing the workflow run's inputs separately. test_bot.py
+# has no access to run_challenge.py's own AI_PROVIDER/GROQ_MODEL/etc (they're
+# a separate process/import, and test_bot.py is started BEFORE run_challenge.py
+# runs), so these come from their own env vars, set by the workflow's
+# "Resolve AI provider/model/thinking-level" step -- same override-or-default
+# resolution run_challenge.py itself uses, kept in sync there. All optional:
+# blank/unset just omits that line from the score message (e.g. running
+# test_bot.py standalone, outside the workflow).
+TEST_AI_PROVIDER = os.environ.get("TEST_AI_PROVIDER", "")
+TEST_AI_MODEL = os.environ.get("TEST_AI_MODEL", "")
+TEST_THINKING_LEVEL = os.environ.get("TEST_THINKING_LEVEL", "")
+
 
 def activation_time_today_utc() -> datetime:
     """Parses TEST_ACTIVATION_TIME_UTC ('HH:MM') into today's UTC datetime."""
@@ -1142,10 +1156,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Challenge complete in chat {chat_id}: score {score}/{TOTAL_QUESTIONS}, "
                 f"time {time_str}"
             )
+            # AI info line is optional -- only shown if the workflow's
+            # resolve_ai step set it (see TEST_AI_PROVIDER above); omitted
+            # entirely (not shown blank) if test_bot.py was run standalone.
+            ai_info_line = ""
+            if TEST_AI_PROVIDER:
+                ai_bits = [TEST_AI_PROVIDER.capitalize()]
+                if TEST_AI_MODEL:
+                    ai_bits.append(TEST_AI_MODEL)
+                if TEST_THINKING_LEVEL:
+                    ai_bits.append(f"thinking: {TEST_THINKING_LEVEL}")
+                ai_info_line = f"AI: {' | '.join(ai_bits)}\n"
+
             await query.message.reply_text(
                 "🏁 Challenge complete! (TEST)\n"
                 f"Score: {score}/{TOTAL_QUESTIONS}\n"
                 f"Time: {time_str}\n"
+                f"{ai_info_line}"
                 "Thanks for testing."
             )
             _sessions.pop(chat_id, None)

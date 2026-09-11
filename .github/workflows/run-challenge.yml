@@ -217,6 +217,50 @@ jobs:
           fi
           echo "tester_utc_time=$tester_utc" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve AI provider/model/thinking-level for this run
+        id: resolve_ai
+        run: |
+          # Single source of truth for "which model will actually be used"
+          # -- test_bot.py (test mode only) needs to show this in the final
+          # score message, but it's a separate process that starts BEFORE
+          # run_challenge.py runs, so it can't read run_challenge.py's own
+          # env.get(..., default) fallback at runtime. Mirrors the exact
+          # same override-or-default logic as the "Run challenge flow"
+          # step's echo block below (and run_challenge.py's own defaults --
+          # GEMINI_MODEL/GROQ_MODEL/OPENROUTER_MODEL) so both places always
+          # agree. If a script default ever changes, update it here too.
+          provider="${{ github.event.inputs.ai_provider || 'groq' }}"
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+
+          if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
+            gemini_model="${{ github.event.inputs.gemini_model }}"
+          else
+            gemini_model="gemini-3.5-flash-lite"
+          fi
+          echo "gemini_model=$gemini_model" >> "$GITHUB_OUTPUT"
+
+          if [ -n "${{ github.event.inputs.groq_model }}" ]; then
+            groq_model="${{ github.event.inputs.groq_model }}"
+          else
+            groq_model="qwen/qwen3.6-27b"
+          fi
+          echo "groq_model=$groq_model" >> "$GITHUB_OUTPUT"
+
+          if [ -n "${{ github.event.inputs.openrouter_model }}" ]; then
+            openrouter_model="${{ github.event.inputs.openrouter_model }}"
+          else
+            openrouter_model="deepseek/deepseek-v4-flash:free"
+          fi
+          echo "openrouter_model=$openrouter_model" >> "$GITHUB_OUTPUT"
+
+          case "$provider" in
+            groq) model="$groq_model" ;;
+            openrouter) model="$openrouter_model" ;;
+            *) model="$gemini_model" ;;
+          esac
+          echo "resolved_model=$model" >> "$GITHUB_OUTPUT"
+          echo "Resolved for this run: AI_PROVIDER=$provider MODEL=$model THINKING_LEVEL=${{ github.event.inputs.thinking_level || 'low' }}"
+
       - name: Start test bot in background (test mode only)
         if: ${{ github.event.inputs.test_mode == 'true' }}
         env:
@@ -226,6 +270,13 @@ jobs:
           TEST_CHANNEL_ID: ${{ secrets.TEST_CHANNEL_ID }}
           TEST_ADMIN_USER_ID: ${{ secrets.TEST_ADMIN_USER_ID }}
           TEST_QUIZ_SELECTION: ${{ github.event.inputs.test_quiz_selection || 'random' }}
+          # So the final "Challenge complete" score message can show which
+          # AI answered -- see the "Resolve AI provider/model/thinking-level"
+          # step above for how these are resolved (same values
+          # run_challenge.py itself will use for the real answering).
+          TEST_AI_PROVIDER: ${{ steps.resolve_ai.outputs.provider }}
+          TEST_AI_MODEL: ${{ steps.resolve_ai.outputs.resolved_model }}
+          TEST_THINKING_LEVEL: ${{ github.event.inputs.thinking_level || 'low' }}
         run: |
           # Runs for the whole rest of this job in the background so the
           # tester step below can talk to it, exactly like the old separate
