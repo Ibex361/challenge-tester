@@ -507,6 +507,34 @@ OPENROUTER_REASONING_SCHEMES = {
     "deepseek-v4-flash": {
         "minimal": "high", "low": "high", "medium": "high", "high": "xhigh",
     },
+    # nvidia/nemotron-3-super-120b-a12b:free -- confirmed 2026-09-11: this
+    # model was silently falling back to the deepseek-v4-flash scheme above
+    # (medium/high THINKING_LEVEL -> reasoning_effort="high"), and a live
+    # run's Question 4 then burned its ENTIRE max_completion_tokens=300
+    # budget on reasoning (completion=300, reasoning=248, both retry
+    # attempts identical) with no room left to emit the actual JSON answer
+    # -- the script's raw-text fallback regex then grabbed a stray letter
+    # ('E', not a real option) out of the truncated/empty response, which
+    # could have silently submitted a wrong answer instead of failing
+    # loudly (see the finish_reason=="length" guard in
+    # _ask_openai_compatible_for_answer's _try_once() for the other half of
+    # this fix). NVIDIA's own model card (docs.api.nvidia.com /
+    # huggingface) describes a reasoning on/off toggle PLUS a distinct
+    # "low effort" reasoning mode, and explicitly recommends low-effort
+    # reasoning with an ~256-token reasoning budget for a good
+    # accuracy/speed balance -- so low/minimal map to "low" here rather
+    # than "none" (unlike Groq's qwen3.6, this isn't confirmed to be a
+    # pure binary switch) and medium/high map to the model's normal graduated
+    # tiers. NOTE: unlike deepseek-v4-flash's scheme above, these exact
+    # string values ("low"/"medium"/"high") are inferred from NVIDIA's own
+    # documentation, not yet independently confirmed as accepted (non-400)
+    # by OpenRouter's specific endpoint for this model -- if OpenRouter
+    # rejects one of these values, that will surface as a clear API error
+    # (via _describe_groq_error) rather than a silent fallback, since this
+    # is now a real scheme entry, not the fallback path.
+    "nemotron-3-super": {
+        "minimal": "low", "low": "low", "medium": "medium", "high": "high",
+    },
 }
 _DEFAULT_OPENROUTER_SCHEME_NAME = "deepseek-v4-flash"
 
@@ -1360,6 +1388,35 @@ def _ask_openai_compatible_for_answer(
         except Exception:
             letter = ""
         if letter not in valid_letters:
+            # Defensive: confirmed 2026-09-11 with nemotron-3-super at
+            # THINKING_LEVEL=medium (reasoning_effort="high" before the
+            # scheme-table fix above) -- the model spent its ENTIRE
+            # max_completion_tokens=300 budget on hidden reasoning tokens
+            # (completion=300, reasoning=248) and never reached the actual
+            # JSON answer, so `raw` was a truncated reasoning fragment, not
+            # real output. The letter-scraping regex below still matched a
+            # stray 'A'-'F' character inside that fragment ('E', not a real
+            # option -- this quiz only has options A-D) and would have
+            # returned it as if it were the model's actual choice, risking
+            # a silently WRONG submitted answer rather than a loud failure.
+            # A truncated response (finish_reason == "length") is
+            # inherently unreliable -- any letter found in it is
+            # coincidental, not a real answer -- so skip the regex
+            # fallback entirely in that case and go straight to the
+            # unparseable-response retry path below instead, regardless of
+            # whether the truncated text happens to contain what looks
+            # like a valid option letter.
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason == "length":
+                log(
+                    f"{provider_label} answer ({attempt_label})",
+                    "INFO",
+                    f"response was truncated (finish_reason='length', likely the "
+                    f"model's full completion-token budget was spent on reasoning) "
+                    f"-- treating as unparseable rather than scanning it for a "
+                    f"letter (raw content: {raw[:200]!r})",
+                )
+                return None
             match = re.search(r"[A-F]", raw.upper())
             letter = match.group(0) if match else None
         return letter
