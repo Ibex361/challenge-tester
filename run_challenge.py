@@ -1230,7 +1230,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
             "model": GROQ_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
-            "max_completion_tokens": 300,
+            "max_completion_tokens": 600,
             "response_format": response_format,
         }
         if GROQ_REASONING_EFFORT is not None:
