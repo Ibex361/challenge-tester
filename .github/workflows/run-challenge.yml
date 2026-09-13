@@ -14,11 +14,13 @@ on:
   workflow_dispatch:
     inputs:
       account:
-        description: "Which Telegram testing account to run as -- SAF uses secret SAF_TG_SESSION, ETH uses secret ETH_TG_SESSION. Lets you fire two runs at once (e.g. comparing Gemini 3.5 Flash-Lite vs qwen3.6) without one logging the other's session out."
+        description: "Which Telegram testing account to run as -- SAF/ETH/Ab62/Ab82 each use their own <ACCOUNT>_TG_SESSION secret. Lets you fire multiple runs at once (e.g. comparing different providers/models) without one logging another's session out."
         type: choice
         options:
           - SAF
           - ETH
+          - Ab62
+          - Ab82
         default: SAF
       test_mode:
         description: "Test mode: run against the throwaway test_bot.py instead of the real bot -- no challenge number needed"
@@ -323,29 +325,36 @@ jobs:
         env:
           SAF_TG_SESSION: ${{ secrets.SAF_TG_SESSION }}
           ETH_TG_SESSION: ${{ secrets.ETH_TG_SESSION }}
+          AB62_TG_SESSION: ${{ secrets.AB62_TG_SESSION }}
+          AB82_TG_SESSION: ${{ secrets.AB82_TG_SESSION }}
         run: |
-          # Picks which of the two per-account session-string secrets to use,
-          # based on the "account" dropdown -- lets SAF and ETH runs fire
-          # concurrently (e.g. one on Gemini 3.5 Flash-Lite, one on
-          # qwen3.6-27b) each logged into its own separate Telegram account,
-          # with no shared state between the two jobs. Masked so it never
-          # appears in logs, same as any other secret-derived value.
+          # Picks which of the four per-account session-string secrets to
+          # use, based on the "account" dropdown -- lets SAF/ETH/Ab62/Ab82
+          # runs fire concurrently (e.g. comparing different providers/
+          # models) each logged into its own separate Telegram account,
+          # with no shared state between jobs. Masked so it never appears
+          # in logs, same as any other secret-derived value.
           #
-          # Also outputs the plain account name (SAF/ETH, not a secret --
-          # no masking needed) as-is, so the same "account" choice also
-          # picks which control/pacing_<account>.json file
+          # Also outputs the plain account name (SAF/ETH/Ab62/Ab82, not a
+          # secret -- no masking needed) as-is, so the same "account"
+          # choice also picks which control/pacing_<account>.json file
           # run_challenge.py loads (PACING_CONFIG_NAME below) -- no
           # separate pacing-file selector to set; choosing an account
           # implies its matching pacing file, per user's explicit
-          # requirement (2026-09-06).
+          # requirement (2026-09-06, extended to Ab62/Ab82 2026-09-11).
           account="${{ github.event.inputs.account || 'SAF' }}"
-          if [ "$account" == "SAF" ]; then
-            session="$SAF_TG_SESSION"
-          else
-            session="$ETH_TG_SESSION"
-          fi
+          case "$account" in
+            SAF) session="$SAF_TG_SESSION" ;;
+            ETH) session="$ETH_TG_SESSION" ;;
+            Ab62) session="$AB62_TG_SESSION" ;;
+            Ab82) session="$AB82_TG_SESSION" ;;
+            *)
+              echo "::error::Unknown account '$account'."
+              exit 1
+              ;;
+          esac
           if [ -z "$session" ]; then
-            echo "::error::Secret ${account}_TG_SESSION is empty or not set."
+            echo "::error::Secret for account '$account' is empty or not set."
             exit 1
           fi
           echo "::add-mask::$session"
