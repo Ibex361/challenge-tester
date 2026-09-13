@@ -504,6 +504,31 @@ GROQ_REASONING_SCHEMES = {
 }
 _DEFAULT_GROQ_SCHEME_NAME = "gpt-oss"
 
+# Which Groq model families CANNOT use response_format: json_schema at all
+# (not even strict:false / best-effort mode) -- confirmed live 2026-09-13:
+# groq/compound rejects response_format=json_schema outright with a 400
+# ("This model does not support response format `json_schema`"), because
+# it's an agentic tool-calling system (web search/code execution), not a
+# plain structured-output-capable chat model -- same reason it also can't
+# take reasoning_effort (see GROQ_REASONING_SCHEMES above). Substring
+# matched against GROQ_MODEL, same convention as GROQ_REASONING_SCHEMES.
+# Every model NOT listed here keeps using json_schema (today's default
+# behavior, unchanged) -- this is an opt-out list, not an allowlist, so a
+# brand-new Groq model with no entry anywhere still gets the
+# stricter/safer json_schema path by default, matching prior behavior.
+# If a future model 400s on json_schema, add its substring here rather
+# than guessing from Groq's docs table -- e.g. qwen/qwen3.6-27b's own
+# Groq model card lists only "JSON Object Mode" as a capability (not
+# "Structured Outputs"), yet json_schema has been working fine for it in
+# this script -- so docs-table absence alone isn't reliable evidence of
+# an actual rejection; only a live 400 is.
+GROQ_JSON_SCHEMA_UNSUPPORTED_MODELS = ["compound"]
+
+
+def _groq_model_supports_json_schema(model_name: str) -> bool:
+    model_lower = model_name.lower()
+    return not any(family in model_lower for family in GROQ_JSON_SCHEMA_UNSUPPORTED_MODELS)
+
 # Same lookup-table pattern as GROQ_REASONING_SCHEMES -- OpenRouter has its
 # own model families with their own valid reasoning_effort values.
 OPENROUTER_REASONING_SCHEMES = {
@@ -583,6 +608,13 @@ if THINKING_LEVEL not in _VALID_THINKING_LEVELS:
 # ask_groq_for_answer's _call_groq() builds its kwargs dict conditionally
 # to handle that, rather than always passing this value straight through.
 GROQ_REASONING_EFFORT = _resolve_groq_reasoning_effort(GROQ_MODEL, THINKING_LEVEL)
+
+# Same idea, for whether GROQ_MODEL can use response_format: json_schema at
+# all -- see GROQ_JSON_SCHEMA_UNSUPPORTED_MODELS above. False for
+# groq/compound; True (today's unchanged default) for everything else.
+# ask_groq_for_answer branches its response_format/prompt/token-budget on
+# this rather than hardcoding json_schema unconditionally.
+GROQ_SUPPORTS_JSON_SCHEMA = _groq_model_supports_json_schema(GROQ_MODEL)
 
 # Same idea for OpenRouter -- see OPENROUTER_REASONING_SCHEMES and
 # _resolve_reasoning_effort above.
@@ -1187,36 +1219,63 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     log(f"Groq answer ({attempt_label})", "INFO", f"using {key_name}")
 
     valid_letters = _LETTERS[: len(options)]
-    prompt = _build_prompt(question_text, options)
 
-    # JSON Schema mode with strict=True forces the model to return exactly
-    # {"answer": "<one of the valid letters>"} -- no free text, no
-    # explanation, nothing to parse out with a regex. reasoning_effort is
-    # tunable via the shared THINKING_LEVEL env var (see above; "minimal"
-    # maps to "low" for Groq, since Groq's live API rejects both "none" and
-    # "minimal" with a 400 despite "none" appearing in some SDK type hints).
-    # Important: gpt-oss-20b ALWAYS spends some tokens reasoning before the
-    # JSON answer, even at "low" -- those reasoning tokens count against
-    # max_completion_tokens. A too-low budget (e.g. 20) gets cut off mid-
-    # reasoning before any JSON is written, causing a strict-mode
-    # json_validate_failed 400. Give it enough headroom for the reasoning
-    # pass plus the short JSON answer; 300 is comfortably enough even at
-    # "medium" effort while still being fast.
-    response_format = {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "quiz_answer",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "answer": {"type": "string", "enum": valid_letters},
+    # groq/compound (and any future model in GROQ_JSON_SCHEMA_UNSUPPORTED_
+    # MODELS) rejects response_format=json_schema outright with a 400 --
+    # confirmed live 2026-09-13 -- so it can't use the same request shape
+    # as every other Groq model here. Three things change together for
+    # such models, all handled below rather than as separate flags:
+    #   1. response_format: json_object instead of json_schema. json_object
+    #      guarantees syntactically valid JSON but does NOT enforce a
+    #      schema, so the schema has to be spelled out in the prompt text
+    #      itself (confirmed Groq guidance: "you must include the JSON
+    #      schema in the system prompt" for json_object) -- see the
+    #      json_instruction addition to the prompt below.
+    #   2. A much larger max_completion_tokens budget. compound is an
+    #      agentic system that can perform server-side tool calls (web
+    #      search, code execution -- up to 10 of them) before returning a
+    #      final answer; Groq's own docs give it an 8192-token completion
+    #      ceiling. The 600-token budget used for ordinary chat models
+    #      (sized for hidden reasoning tokens, see below) has no headroom
+    #      at all for tool-call overhead, so it's raised to 2000 --
+    #      generous relative to a short JSON answer, conservative relative
+    #      to the model's real 8192 ceiling, and cheap to lower later from
+    #      real usage numbers (_log_groq_usage logs completion/total
+    #      tokens for exactly this purpose) if 2000 proves to be overkill.
+    #   3. The same truncation guard used in _ask_openai_compatible_for_
+    #      answer's _try_once() (see that function, 2026-09-11 fix): if
+    #      finish_reason=="length", the response was cut off mid-
+    #      tool-call/reasoning and any letter found in it is coincidental,
+    #      not a real answer -- treat it as unparseable rather than risk
+    #      silently submitting a wrong guess scraped from truncated text.
+    if GROQ_SUPPORTS_JSON_SCHEMA:
+        prompt = _build_prompt(question_text, options)
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "quiz_answer",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "answer": {"type": "string", "enum": valid_letters},
+                    },
+                    "required": ["answer"],
+                    "additionalProperties": False,
                 },
-                "required": ["answer"],
-                "additionalProperties": False,
             },
-        },
-    }
+        }
+        max_completion_tokens = 600
+    else:
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object of the exact form "
+            f'{{"answer": "<letter>"}}, where <letter> is one of: '
+            f"{', '.join(valid_letters)}. No other text, no markdown code "
+            "fences, nothing before or after the JSON object."
+        )
+        prompt = _build_prompt(question_text, options) + json_instruction
+        response_format = {"type": "json_object"}
+        max_completion_tokens = 2000
 
     def _call_groq():
         max_attempts = 3
@@ -1230,7 +1289,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
             "model": GROQ_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
-            "max_completion_tokens": 600,
+            "max_completion_tokens": max_completion_tokens,
             "response_format": response_format,
         }
         if GROQ_REASONING_EFFORT is not None:
@@ -1257,13 +1316,33 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
     def _try_once():
         resp = _call_groq()
         _log_groq_usage(resp, f"Groq answer ({attempt_label})")
-        raw = (resp.choices[0].message.content or "").strip()
+        choice = resp.choices[0]
+        raw = (choice.message.content or "").strip()
         try:
             parsed = json.loads(raw)
             letter = str(parsed.get("answer", "")).strip().upper()
         except Exception:
             letter = ""
         if letter not in valid_letters:
+            # See the docstring-level comment above GROQ_SUPPORTS_JSON_SCHEMA's
+            # branch above (point 3) for why finish_reason=="length" is
+            # checked before falling back to a regex scan -- same
+            # reasoning as _ask_openai_compatible_for_answer's identical
+            # guard. Most relevant for the json_object path (compound can
+            # burn its whole budget on tool calls), but checked
+            # unconditionally since a strict-mode json_schema response
+            # could in principle also be cut off given a too-small budget.
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason == "length":
+                log(
+                    f"Groq answer ({attempt_label})",
+                    "INFO",
+                    f"response was truncated (finish_reason='length', likely the "
+                    f"model's full completion-token budget was spent on reasoning "
+                    f"and/or tool calls) -- treating as unparseable rather than "
+                    f"scanning it for a letter (raw content: {raw[:200]!r})",
+                )
+                return None
             # Fall back to scanning for a bare letter, in case strict mode
             # wasn't honored for some reason.
             match = re.search(r"[A-F]", raw.upper())
@@ -1914,8 +1993,10 @@ async def main():
     # so this adds no latency -- purely printing values already resolved
     # above.
     if AI_PROVIDER == "groq":
+        _response_format_summary = "json_schema" if GROQ_SUPPORTS_JSON_SCHEMA else "json_object"
         _provider_summary = (
             f"GROQ_MODEL={GROQ_MODEL} reasoning_effort={GROQ_REASONING_EFFORT!r} "
+            f"response_format={_response_format_summary} "
             f"groq_accounts={len(_groq_clients)} ({', '.join(name for name, _ in _groq_clients)})"
         )
     elif AI_PROVIDER == "openrouter":
