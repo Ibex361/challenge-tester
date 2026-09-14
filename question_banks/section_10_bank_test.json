@@ -44,6 +44,18 @@
       "options": ["A", "B", "C", "D"],
       "correct": 2,
       "bare_letters": true
+    },
+    {
+      "id": 3,
+      "text": "$50,000 account, 5% daily / 10% total drawdown. Day 3 closing loss for the day is $2,400, from a balance that was already down $2,000 from Day 2. Any limit breached?",
+      "options": [
+        "Total only",
+        "Neither",
+        "Both",
+        "Daily only"
+      ],
+      "correct": 1,
+      "bare_letters": false
     }
   ]
 }
