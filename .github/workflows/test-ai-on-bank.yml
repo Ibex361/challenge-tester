@@ -1,0 +1,129 @@
+name: Test AI On Bank
+
+on:
+  # Manual-only — one-off diagnostic, not a schedule. Never sends anything
+  # to Telegram; only calls the configured AI provider.
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "bulk: answer every question in bank_file, report misses only. investigate: re-ask specific question_ids with reasoning shown."
+        type: choice
+        options:
+          - bulk
+          - investigate
+        default: bulk
+      bank_file:
+        description: "Path to a question bank JSON, e.g. question_banks/section_10_bank_test.json"
+        type: string
+        default: "question_banks/section_10_bank_test.json"
+      question_ids:
+        description: "investigate mode only: comma-separated bank ids to re-ask with reasoning (from a prior bulk-mode miss report)."
+        type: string
+        default: ""
+      ai_provider:
+        description: "Which AI answers the questions: groq (fast), gemini (fallback), or openrouter (free, DeepSeek V4 Flash by default)"
+        type: choice
+        options:
+          - groq
+          - gemini
+          - openrouter
+        default: groq
+      gemini_model:
+        description: "Gemini model override (e.g. gemini-3.5-flash-lite). Leave blank to use the script's default."
+        type: string
+        default: ""
+      groq_model:
+        description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
+        type: string
+        default: ""
+      openrouter_model:
+        description: "OpenRouter model override. Leave blank to use the script's default (deepseek/deepseek-v4-flash:free)."
+        type: string
+        default: ""
+      thinking_level:
+        description: "Reasoning effort for whichever AI provider is active. minimal (fastest), low (default), medium, or high."
+        type: choice
+        options:
+          - minimal
+          - low
+          - medium
+          - high
+        default: low
+      section_notes:
+        description: "Optional: filename (no .md) of extracted section notes to attach to every question's prompt, e.g. section_10. See section_notes/README.md. Leave blank for no notes."
+        type: string
+        default: ""
+
+jobs:
+  test-ai-on-bank:
+    runs-on: ubuntu-latest
+    # One-off diagnostic over a hand-sized bank, no Telegram waiting/pacing
+    # involved -- well short of run-challenge.yml's 40, but generous enough
+    # for a large bank at a slow provider/thinking_level.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate inputs
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "investigate" ] && [ -z "${{ github.event.inputs.question_ids }}" ]; then
+            echo "::error::question_ids is required when mode is investigate."
+            exit 1
+          fi
+
+      - name: Run AI bank test
+        env:
+          # test_ai_on_bank.py imports run_challenge, which requires these
+          # at module import time regardless of mode -- same reason
+          # test_gemini_on_history.py already needs them (see context.json).
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.SAF_TG_SESSION }}
+          # TEST_MODE=true sidesteps run_challenge.py's real-mode-only
+          # requirement for CHALLENGE_BOT_USERNAME/CHALLENGE_NUMBER --
+          # nothing here ever messages any bot, real or test, so the
+          # specific values don't matter, only that import-time succeeds.
+          TEST_MODE: "true"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+          GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+          GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+          GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+          GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AI_PROVIDER: ${{ github.event.inputs.ai_provider || 'groq' }}
+          THINKING_LEVEL: ${{ github.event.inputs.thinking_level || 'low' }}
+          SECTION_NOTES: ${{ github.event.inputs.section_notes }}
+          MODE: ${{ github.event.inputs.mode || 'bulk' }}
+          BANK_FILE: ${{ github.event.inputs.bank_file }}
+          QUESTION_IDS: ${{ github.event.inputs.question_ids }}
+        run: |
+          if [ -n "${{ github.event.inputs.gemini_model }}" ]; then
+            export GEMINI_MODEL="${{ github.event.inputs.gemini_model }}"
+            echo "Using GEMINI_MODEL override: $GEMINI_MODEL"
+          fi
+          if [ -n "${{ github.event.inputs.groq_model }}" ]; then
+            export GROQ_MODEL="${{ github.event.inputs.groq_model }}"
+            echo "Using GROQ_MODEL override: $GROQ_MODEL"
+          fi
+          if [ -n "${{ github.event.inputs.openrouter_model }}" ]; then
+            export OPENROUTER_MODEL="${{ github.event.inputs.openrouter_model }}"
+            echo "Using OPENROUTER_MODEL override: $OPENROUTER_MODEL"
+          fi
+          python test_ai_on_bank.py
