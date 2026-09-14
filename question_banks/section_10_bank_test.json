@@ -41,7 +41,12 @@
     {
       "id": 2,
       "text": "Do firms that disclose Demo accounts also tend to convert to live accounts?\nA) Yes, always\nB) Only sometimes\nC) Not addressed\nD) No",
-      "options": ["A", "B", "C", "D"],
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
       "correct": 2,
       "bare_letters": true
     },
@@ -56,6 +61,258 @@
       ],
       "correct": 1,
       "bare_letters": false
+    },
+    {
+      "id": 4,
+      "text": "$10,000 account, 5% daily drawdown. A trader's loss for the day lands at exactly $500. Has the daily limit been breached?\nA) Yes\nB) No\nC) Only combined with total drawdown\nD) Not enough information",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 5,
+      "text": "$20,000 account, 10% total drawdown. Balance falls to exactly $18,000. Evaluation failed?\nA) Yes\nB) No\nC) Only if it also happened in one day\nD) Depends on the firm",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 6,
+      "text": "1-step evaluation. Is the total drawdown limit higher or lower than a 2-step's?\nA) Higher\nB) Lower\nC) Identical\nD) Not stated",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 7,
+      "text": "A trader is profitable on 4 separate days but only trades on 2 days total that month. Does this satisfy every version of the Consistency Rule described?\nA) Yes, always\nB) No, never\nC) Only for firms with a minimum-trading-days requirement\nD) Only for 1-step evaluations",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 2,
+      "bare_letters": true
+    },
+    {
+      "id": 8,
+      "text": "A trader grows their balance by 0.4% on a given day. Does that count as a \"profitable day\" under the Consistency Rule?\nA) Yes, any growth counts\nB) No, growth must be positive but the bar is unspecified\nC) Only 0.5% or more counts, per the note\nD) Not addressed",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 9,
+      "text": "A trader passes a $10,000 challenge, gets funded, then later violates the daily drawdown rule while funded. Does the funded account size stay $10,000?\nA) Yes, same size as evaluation\nB) No, funded accounts are always larger\nC) Not addressed\nD) Only if they didn't violate any rules",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 0,
+      "bare_letters": true
+    },
+    {
+      "id": 10,
+      "text": "Is twice-a-month payout the industry standard, or one firm's specific policy as described in the note?\nA) Industry standard\nB) One firm's example\nC) Universal minimum\nD) Universal maximum",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 11,
+      "text": "Which profit split is described as the universal rule across all prop firms: 80/20 or 90/10?\nA) 80/20\nB) 90/10\nC) Neither is universal\nD) Both, depending on account size",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 2,
+      "bare_letters": true
+    },
+    {
+      "id": 12,
+      "text": "Does the note state that every prop firm gives funded traders a Demo account, or that most do?\nA) Every firm, no exceptions\nB) Most firms, with rare exceptions\nC) Only firms that were sued\nD) Split evenly between demo and live",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 13,
+      "text": "Where does the money for a funded trader's payout literally come from, according to the note?\nA) Their own demo trading gains\nB) The firm's investment portfolio\nC) The pool of evaluation fees paid by all entrants\nD) A government-backed guarantee fund",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 2,
+      "bare_letters": true
+    },
+    {
+      "id": 14,
+      "text": "According to the note, what fraction of prop firms eventually convert consistently profitable traders to live accounts?\nA) Exactly 10%\nB) Roughly half\nC) A specific number is not given \u2014 only described as rare\nD) The majority",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 2,
+      "bare_letters": true
+    },
+    {
+      "id": 15,
+      "text": "Did U.S. and Canadian courts prove that My Forex Funds manipulated prices, or does the note describe this as an allegation?\nA) Proven in court\nB) Described as an allegation\nC) Confirmed by Trustpilot reviewers\nD) Neither \u2014 only the business-model lie was addressed",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 16,
+      "text": "Does a high Trustpilot rating, per the note's own point, mean a prop firm is safe from these issues?\nA) Yes, that's the note's point\nB) No \u2014 the note uses My Forex Funds' 4.8 rating to show reputation isn't proof of safety\nC) Only if the rating is above 4.5\nD) Not addressed at all",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 17,
+      "text": "After the My Forex Funds incident, does the note say ALL prop firms now disclose Demo accounts, or most?\nA) All, without exception\nB) Almost every firm\nC) Only firms operating in Ethiopia\nD) Not addressed",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 18,
+      "text": "The note states 90%+ of new traders fail. Fail at what, specifically \u2014 the funded/live account, or something else?\nA) The funded account after passing\nB) New traders in trading generally, not the evaluation specifically\nC) The consistency rule specifically\nD) Not enough information to say",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 19,
+      "text": "Does the note give a specific number of \"hidden rules\" firms commonly impose?\nA) Yes, typically 3-5\nB) No \u2014 only describes them as \"many,\" unquantified\nC) Yes, exactly one per firm\nD) The note says hidden rules are rare, not common",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 20,
+      "text": "Does the note claim price manipulation is confirmed across the prop firm industry generally, or specific to one firm with a broader suspicion noted separately?\nA) Confirmed industry-wide\nB) Confirmed only for My Forex Funds, with a separate general \"reasonable to suspect\" framing\nC) Never mentioned outside My Forex Funds\nD) Confirmed for all firms that offer Demo accounts",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 21,
+      "text": "Per the note's recommendation, does picking a regulated, licensed, reputable firm guarantee no price manipulation or improper payout practices?\nA) Yes, that's what regulation guarantees\nB) The note frames it as a check to make, not a guarantee\nC) Only for firms operating in the U.S. or Canada\nD) Not addressed",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 22,
+      "text": "Once a trader is funded, does the Consistency Rule the note describes stop applying, or continue?\nA) Stops \u2014 it's evaluation-only\nB) Continues \u2014 funded traders remain under the same rules\nC) Only continues for 2-step evaluations\nD) Not addressed for funded traders",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 23,
+      "text": "Does the note quantify how much of total firm revenue comes from evaluation fees versus other sources?\nA) Yes, a specific percentage is given\nB) No \u2014 only that fees are described as the primary revenue source, qualitatively\nC) The note says fees account for exactly half\nD) The note says fees are a minor, secondary source",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
+    },
+    {
+      "id": 24,
+      "text": "For a 2-step evaluation, is the daily drawdown limit ever stated as different from the 5% most-common figure?\nA) Yes, 2-step always uses a lower daily limit\nB) No differentiation is given for daily drawdown by step count \u2014 only total drawdown is said to vary\nC) 2-step uses a higher daily limit\nD) Not addressed for either",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": 1,
+      "bare_letters": true
     }
   ]
 }
