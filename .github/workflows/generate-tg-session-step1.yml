@@ -54,3 +54,18 @@ jobs:
           # it's meaningless without the code, so there's nothing sensitive
           # worth keeping around longer.
           retention-days: 1
+
+      - name: Print the run ID needed for step 2
+        run: |
+          # Printed explicitly and unambiguously on its own line, because
+          # the upload-artifact step above ALSO prints a similar-looking
+          # ~11-digit "Artifact ID" (and an "Artifact download URL"
+          # containing BOTH the run ID and the artifact ID next to each
+          # other) -- easy to grab the wrong number by accident. Fixed
+          # 2026-09-14 after this exact mix-up happened on a real run.
+          # github.run_id is the correct, guaranteed-authoritative value --
+          # not parsed from a URL or another step's log output.
+          echo "=================================================="
+          echo "STEP 2 NEEDS THIS RUN ID (not the Artifact ID above):"
+          echo "  ${{ github.run_id }}"
+          echo "=================================================="

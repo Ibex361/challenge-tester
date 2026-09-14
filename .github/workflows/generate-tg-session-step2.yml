@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       step1_run_id:
-        description: "Run ID of the step-1 workflow run that requested this code (visible in that run's URL, e.g. .../actions/runs/1234567890)"
+        description: "The RUN ID from step 1's own 'Print the run ID needed for step 2' log line -- NOT the Artifact ID shown by the upload step (those are two different similar-looking numbers)."
         type: string
         required: true
       code:
