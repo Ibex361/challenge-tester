@@ -96,6 +96,12 @@ jobs:
           # nothing here ever messages any bot, real or test, so the
           # specific values don't matter, only that import-time succeeds.
           TEST_MODE: "true"
+          # run_challenge.py requires TEST_ACTIVATION_TIME_UTC whenever
+          # TEST_MODE=true, but this script never reads OPEN_TIME_UTC or
+          # does any activation-time gating -- it only imports the AI
+          # answering functions. Any well-formed HH:MM value satisfies
+          # import-time validation without meaning anything here.
+          TEST_ACTIVATION_TIME_UTC: "00:00"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
