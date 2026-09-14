@@ -1307,7 +1307,7 @@ def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: s
                 },
             },
         }
-        max_completion_tokens = 600
+        max_completion_tokens = 1500
     else:
         json_instruction = (
             "\n\nRespond with ONLY a JSON object of the exact form "
