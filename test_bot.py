@@ -894,7 +894,407 @@ SECTION_9_QUIZ = [
     },
 ]
 
-# Each quiz stays together as its own fixed 5-question set, matching how
+# -- Claude-generated quizzes for Section 10 (How Prop Firms Work), from
+# section_10.md. Per the cla_<N><letter> convention (see CLA_7A/CLA_7B and
+# CLA_8A-CLA_8D comment blocks above). Per user's explicit request
+# (2026-09-14), three 5-question sets, each with a different flavor of
+# difficulty rather than three interchangeable "hard" sets:
+#
+#   CLA_10A = tricky calculations with tricky specifiers -- modeled
+#   directly on the user's own example of the kind of trap this is meant
+#   to catch: section_9's "smallest contract size across ALL account
+#   types" question, where a less careful model answers "0.01 lot" (the
+#   smallest lot size on a Standard account) without realizing a Cent
+#   account's 0.01 lot is only 1/100th of a Standard micro lot -- i.e. the
+#   surface-level "smallest unit" isn't actually the smallest once you
+#   check every account type the question specifies. Section 10's
+#   structural analogue used here (Q3 below) is the Consistency Rule:
+#   "profitable on at least 3 separate days" + "profitable day = ~0.5%
+#   growth" reads, on a shallow pass, like "the account needs to grow by
+#   0.5%" -- missing that it's 3 INDEPENDENT days each individually
+#   clearing that bar, not one combined/compounded 0.5% (or 1.5%) figure.
+#   Q1/Q2/Q5 are more standard drawdown/split/account-size calculations
+#   with a specific correct-vs-adjacent-fact trap (the daily-drawdown
+#   LOSS AMOUNT vs. the total-drawdown FLOOR BALANCE, easy to swap; and
+#   which account sizes the note actually names vs. plausible real-world
+#   prop-firm sizes it never mentions).
+#
+#   CLA_10B = exploits genuinely ambiguous wording/phrasing straight from
+#   the note's own prose (not calculations) -- e.g. "it" with an
+#   unclear antecedent, a qualifier that could bind to either of two
+#   adjacent clauses, a claim stated as a generalization ("most",
+#   "common", "rare") that a shallow read might misremember as absolute.
+#   Per the same style precedent as CLA_8A-D: distractors are real
+#   facts/phrases pulled from elsewhere in section_10.md, not invented
+#   wrong answers.
+#
+#   CLA_10C = "complicate it as much as you like" (user's own words) --
+#   the hardest of the three, deliberately combining multiple traps in a
+#   single question (a calculation nested inside a conceptual distinction,
+#   or two adjacent rules that must both be tracked correctly at once)
+#   rather than one clean trap per question like CLA_10A/10B.
+CLA_10A = [
+    {
+        "text": (
+            "A prop firm's evaluation account is $10,000, with the industry-standard 5% daily drawdown "
+            "and 10% total drawdown rules. On Day 1 the trader loses exactly $500, stopping right at the "
+            "daily drawdown limit without breaching it. What is the account's total drawdown floor -- the "
+            "balance it must not fall below overall -- for the rest of the evaluation?\n"
+            "A) $500\n"
+            "B) $9,500\n"
+            "C) $9,000\n"
+            "D) $1,000"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+        # Trap: total drawdown is computed from the ORIGINAL $10,000
+        # account size (10% of $10,000 = $1,000 lost -> floor $9,000),
+        # not from the $9,500 balance remaining after Day 1's loss. A
+        # careless read conflates "how much can still be lost" with "the
+        # floor," or re-anchors the 10% calculation to the post-Day-1
+        # balance instead of the account's own fixed size.
+    },
+    {
+        "text": (
+            "A trader is funded on a $10,000 account and later requests a payout on $1,000 of profit, under "
+            "a firm using the industry's other commonly-offered split (not the 80/20 one). "
+            "How much does the trader receive?\n"
+            "A) $800\n"
+            "B) $900\n"
+            "C) $200\n"
+            "D) $100"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+        # Trap: the note names TWO splits (80/20 common-standard, and
+        # 90/10 as the alternative some firms offer) -- the question
+        # explicitly asks for the non-80/20 one, so $800 (option A) is
+        # the right number for the WRONG split, a classic "answered the
+        # calculation correctly for the wrong condition" trap.
+    },
+    {
+        "text": (
+            "A prop firm requires its Consistency Rule to be met before payout: the account must be "
+            "profitable on at least 3 separate days, with a \"profitable day\" defined as growing the "
+            "account balance by at least 0.5%. A trader's account grows by exactly 0.5% on a single day, "
+            "then stays flat for the rest of the evaluation. Have they satisfied the Consistency Rule?\n"
+            "A) No -- the rule requires at least 3 separate profitable days, not one day reaching the threshold\n"
+            "B) Yes, but only if that single day's 0.5% is compounded across the full evaluation period\n"
+            "C) Yes -- they hit the required 0.5% growth threshold\n"
+            "D) No -- 0.5% is only the minimum for a single trade, not a full day"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+        # This is the section-10 structural analogue to the user's
+        # cent/lot example: the shallow reading latches onto the "0.5%"
+        # number as if it's the whole rule, missing that it's a per-day
+        # threshold that must independently recur on at least 3 separate
+        # days -- one day clearing 0.5% is necessary but nowhere near
+        # sufficient.
+    },
+    {
+        "text": (
+            "Which of the following account sizes is explicitly mentioned in the module as an example of a "
+            "purchasable evaluation account size?\n"
+            "A) $1,000\n"
+            "B) $25,000\n"
+            "C) $75,000\n"
+            "D) $50,000"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+        # Trap: the note's example sizes are "$2,500... $5,000, $10k,
+        # $50k, $100,000" -- $50,000 is the only one of these four
+        # options actually stated; $1,000/$25,000/$75,000 are all
+        # plausible real-world prop-firm sizes that simply never appear
+        # in this specific note, testing recall precision over general
+        # prop-firm familiarity.
+    },
+    {
+        "text": (
+            "A firm's total drawdown is described as \"common in 2-step evaluations\" at one level, but the "
+            "note says 1-step evaluations typically use a figure that is slightly different from that level. "
+            "Relative to the common 2-step total drawdown figure, is the typical 1-step total drawdown "
+            "higher, lower, or the same?\n"
+            "A) Higher than 10%\n"
+            "B) The same 10%\n"
+            "C) Slightly lower than 10%\n"
+            "D) The note does not compare 1-step and 2-step total drawdown at all"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+        # Trap: the note states total drawdown is "10%... though this
+        # varies... 10% is common in 2-step evaluations, but it may be
+        # slightly lower than 10% for 1-step evaluations" -- easy to
+        # either miss the 1-step/2-step distinction entirely (picking D)
+        # or misremember the direction of the difference (picking A).
+    },
+]
+
+CLA_10B = [
+    {
+        "text": (
+            "The note says: \"Because it's technically a Demo account, the profit you generate there is not "
+            "real profit. What you're being paid out with later is not literally your trading gains -- it's "
+            "money the firm pays you out of their own pocket.\" Based on this, where does the money used for "
+            "a trader's payout actually come from?\n"
+            "A) The trader's own simulated Demo-account gains, converted to real currency by the broker\n"
+            "B) A shared pool that all funded traders' Demo accounts draw from equally\n"
+            "C) The trader's original evaluation fee, refunded with interest\n"
+            "D) The firm's own funds, separate from whatever the Demo account shows as \"profit\""
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+        # Ambiguity: "it's money the firm pays you out of their own
+        # pocket" is a plain enough statement, but option A preys on the
+        # earlier, more intuitive-sounding misconception the note is
+        # explicitly correcting ("people assume... you're given an
+        # account with real money") -- testing whether the model is
+        # still holding onto the misconception the passage exists to
+        # dispel, or is quoting the surface words without registering
+        # which claim they're debunking.
+    },
+    {
+        "text": (
+            "The note states that prop firms \"could have an incentive to prevent a consistently profitable "
+            "trader from continuing to be profitable -- since a profitable trader represents an ongoing "
+            "expense for the firm.\" Taken together with the note's account of the My Forex Funds case, what "
+            "does the note actually claim happened, versus what it only says is merely plausible/suspected?\n"
+            "A) The note claims ALL prop firms manipulate prices against profitable traders, using My Forex Funds as one confirmed example among many\n"
+            "B) The note claims My Forex Funds is the only prop firm that has ever manipulated prices\n"
+            "C) The note claims manipulation is merely a reasonable suspicion in general, but reports My Forex Funds specifically manipulating prices as part of the actual allegations against them\n"
+            "D) The note claims manipulation never actually happened at any firm, including My Forex Funds, and is purely a theoretical concern"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+        # Ambiguity: the note makes a general, hedged claim ("it is
+        # reasonable to suspect...") right next to a specific, concrete
+        # allegation about one named firm ("they manipulated prices
+        # against traders who became consistently profitable"). It's
+        # easy to blur the two into either "this is proven true of every
+        # firm" (A) or "this is just speculation, nothing was actually
+        # alleged" (D) -- the note is doing both at once, at two
+        # different levels of certainty, about two different scopes.
+    },
+    {
+        "text": (
+            "The note lists Daily Drawdown, Total Drawdown, and the Consistency Rule as \"common\" rules, then "
+            "says \"individual firms may add their own additional rules on top of these.\" Later, in the "
+            "long-term-career section, it separately warns that \"many prop firms have many hidden rules... "
+            "your account might get terminated due to a break of a rule you were not even shown.\" Are the "
+            "\"additional rules\" from the first passage and the \"hidden rules\" from the second passage "
+            "describing the same thing?\n"
+            "A) Yes -- both phrases refer to exactly the same set of extra, firm-specific rules\n"
+            "B) No -- \"additional rules\" only applies during the evaluation phase, while \"hidden rules\" only applies after becoming funded\n"
+            "C) No -- \"hidden rules\" refers only to the Consistency Rule specifically, since it's described as newer\n"
+            "D) Not necessarily -- the first passage's \"additional rules\" are simply extra disclosed rules beyond the standard three; the second passage specifically adds that some rules may not even be shown to the trader at all"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+        # Ambiguity: the note never explicitly says these two phrases
+        # are the same concept restated, nor explicitly says they're
+        # different -- it's a genuine inference question. B is the most
+        # textually careful answer (additional rules could be disclosed
+        # OR hidden; "hidden" is a specific, stronger claim the second
+        # passage adds), while A collapses a real distinction and C/D
+        # invent a scope restriction the note never states.
+    },
+    {
+        "text": (
+            "The note says some (rare) prop firms \"eventually convert genuinely consistent traders to "
+            "live/real accounts... but this is very as uncommon.\" It also separately says \"almost every "
+            "firm openly tells you they are using demo account\" (after the My Forex Funds incident). Do "
+            "these two statements describe the same population of firms?\n"
+            "A) Yes -- firms that are honest about using Demo accounts are the same firms that eventually convert traders to live accounts\n"
+            "B) No -- being transparent that an account is a Demo account is a separate matter from whether that firm ever later converts a trader to a real/live account; a firm can openly disclose Demo status and still never convert anyone\n"
+            "C) Yes, because the note states both facts in the same paragraph\n"
+            "D) No -- the two statements directly contradict each other, so the note cannot mean both"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+        # Ambiguity: two true-but-separate claims from different parts
+        # of the note (disclosure honesty vs. live-account conversion
+        # rarity) sit close enough in theme that they're easy to merge
+        # into one claim. Nothing in the note licenses treating "honest
+        # about Demo" and "converts to live" as correlated -- they're
+        # simply two different facts about firms in general.
+    },
+    {
+        "text": (
+            "The note explains the business model like this: challenge fees are the firm's real revenue/profit, "
+            "and paying a successful trader is funded \"from that challenge-fee profit pool\" -- making a "
+            "profitable trader \"an expense paid for out of the money collected from everyone.\" Who, "
+            "according to this passage, is actually funding a specific winning trader's payout?\n"
+            "A) The collective pool of challenge fees paid by all entrants, including the ~90%+ who failed\n"
+            "B) The firm's separate investment portfolio, unrelated to challenge fees\n"
+            "C) Other currently-funded traders' ongoing Demo account profits\n"
+            "D) That specific trader's own past challenge-fee payments, refunded to them"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+        # Ambiguity: "paid for out of the money collected from everyone"
+        # is a collective/pooled claim, but it's easy to misread as "your
+        # own fee comes back to you" (A, a comforting but wrong
+        # simplification) -- the note is explicit that the ~90%+ who
+        # fail are the actual source of the payout, not the winning
+        # trader's own money or a return of their own fee.
+    },
+]
+
+CLA_10C = [
+    {
+        "text": (
+            "A $50,000 evaluation account has 5% daily drawdown and 10% total drawdown (2-step evaluation, "
+            "standard figures). Across the first 3 days: Day 1 the account gains $1,000 (closing at $51,000); "
+            "Day 2 it loses $2,000 (closing at $49,000); Day 3 it loses $2,400. Using the ORIGINAL $50,000 "
+            "account size as the fixed basis for both drawdown rules (not a recalculated basis from any daily "
+            "closing balance), does Day 3 breach the daily drawdown limit, the total drawdown limit, both, or "
+            "neither?\n"
+            "A) Only the daily drawdown limit is breached\n"
+            "B) Only the total drawdown limit is breached\n"
+            "C) Both limits are breached\n"
+            "D) Neither limit is breached"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 3,
+        "bare_letters": True,
+        # Nested calculation: daily drawdown = 5% of $50,000 = $2,500 max
+        # single-day loss -- Day 3's $2,400 loss is UNDER that, so daily
+        # is NOT breached (a rushed read might flag it as breached simply
+        # because $2,400 "looks large"). Total drawdown floor = 10% of
+        # $50,000 = $45,000 -- balance after Day 3 is $49,000 - $2,400 =
+        # $46,600, still above the $45,000 floor, so total is also NOT
+        # breached. Both individually clear their limits with genuine
+        # margin to spare ($100 under the daily cap, $1,600 above the
+        # total floor) -- this specific pairing of numbers was chosen so
+        # that neither limit is breached by a wide, obvious margin,
+        # forcing an actual calculation rather than a rough guess.
+    },
+    {
+        "text": (
+            "A trader passes a 2-step evaluation and gets funded on a $10,000 account under an 80/20 split. "
+            "In month 1 they request a payout on $2,000 profit. In month 2, a Consistency Rule violation is "
+            "discovered retroactively from month 1's trading (profit came from essentially one large trade, "
+            "not multiple separate profitable days) -- but the note says the SAME rules from evaluation "
+            "\"still apply\" once funded, and breaking them \"will result in your funded account being taken "
+            "away.\" Strictly by what the note states, what is the stated consequence, and does the note say "
+            "anything about clawing back the month-1 payout already received?\n"
+            "A) The funded account is taken away; the note also explicitly states the prior payout must be refunded\n"
+            "B) Nothing happens, since the violation was only discovered retroactively\n"
+            "C) The funded account is taken away; the note does not state anything about clawing back a prior payout\n"
+            "D) The trader must simply requalify through the Consistency Rule again on the same account, per the note"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+        # Nested trap: this combines a real, explicit rule (breaking
+        # rules -> account taken away) with a plausible-sounding but
+        # UNSTATED consequence (clawing back a prior payout) that the
+        # note simply never mentions either way. The honest, textually
+        # supportable answer is B -- acknowledging the one consequence
+        # the note DOES state while correctly declining to invent one it
+        # doesn't. A is attractive because clawback sounds like a
+        # reasonable real-world policy, but that's an assumption from
+        # outside the note, not something stated in it.
+    },
+    {
+        "text": (
+            "A prop firm offers both a 1-step and a 2-step evaluation on the same $10,000 account size, with "
+            "identical 5% daily drawdown on both. The 2-step evaluation uses the common 10% total drawdown; "
+            "per the note, the 1-step evaluation's total drawdown is typically slightly lower than that. If "
+            "the 1-step total drawdown for this firm is 8% (a plausible \"slightly lower than 10%\" figure, "
+            "though the note gives no exact 1-step number), how much MORE room (in dollars) does a trader on "
+            "the 2-step evaluation have before hitting total drawdown, compared to a trader on the 1-step "
+            "evaluation, on the same $10,000 size?\n"
+            "A) $0 -- both evaluations use the same total drawdown figure per the note\n"
+            "B) $100 more room on the 2-step evaluation\n"
+            "C) $200 more room on the 2-step evaluation\n"
+            "D) Cannot be determined, because the note does not give an exact 1-step total drawdown figure"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 2,
+        "bare_letters": True,
+        # Nested trap: this deliberately supplies a concrete number (8%)
+        # for something the note only describes qualitatively
+        # ("slightly lower than 10%"), then asks a calculation ON that
+        # supplied premise. The question explicitly frames 8% as "a
+        # plausible... figure" being used FOR THIS CALCULATION, not as a
+        # fact from the note -- so D (correct in spirit, that the note
+        # itself gives no exact figure) is actually a trap here, because
+        # the question isn't asking what the note states the 1-step
+        # figure is, it's asking readers to compute with the number the
+        # question itself supplied: 10% of $10,000 = $1,000 vs 8% of
+        # $10,000 = $800, a $200 difference (option C). This tests
+        # whether the model can distinguish "the note doesn't give this
+        # number" from "the question gave me this number to compute
+        # with" -- two different, easily conflated things.
+    },
+    {
+        "text": (
+            "Consider the note's full account of My Forex Funds: popular in Ethiopia around 2021, roughly "
+            "4.8-star on Trustpilot beforehand, shut down by US/Canadian lawsuits over lying about giving real "
+            "accounts (they were actually Demo) and manipulating prices against consistently profitable "
+            "traders. The note also separately argues prop firms have a structural incentive to prevent "
+            "profitable traders from staying profitable, since such traders are an ongoing expense. Which "
+            "single statement is the note's own overall position on the connection between these two ideas?\n"
+            "A) The general incentive argument proves that every prop firm manipulates prices, and My Forex Funds is simply the one that got legally caught\n"
+            "B) My Forex Funds is presented as a real-world case that happened to match the kind of incentive the note describes in general -- not proof the general claim applies to all firms, and not something the note treats as pure coincidence unrelated to that incentive either\n"
+            "C) The note explicitly states My Forex Funds is the sole exception, and warns no other firm has ever had this incentive\n"
+            "D) The note treats the general incentive argument and the My Forex Funds case as entirely unrelated topics that merely appear in the same section by coincidence"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 1,
+        "bare_letters": True,
+        # Nested trap: combines the CLA_10B-style ambiguity (general
+        # suspicion vs. one confirmed case) with a harder "which single
+        # sentence best captures the note's own epistemic stance"
+        # framing -- there's no explicit topic sentence stating this
+        # relationship, so it must be inferred from how the two passages
+        # sit next to each other and what each one actually claims (a
+        # concrete allegation for one firm; a general, hedged
+        # possibility for firms broadly) without over- or under-reading
+        # either direction (A over-generalizes, C/D both under-connect
+        # or falsely isolate the case).
+    },
+    {
+        "text": (
+            "A trader on a $100,000 funded account (passed a 2-step evaluation) requests a payout of $5,000 "
+            "profit under a 90/10 split, but this firm only allows payouts twice per month, and the trader has "
+            "already requested one payout earlier this same month. According to what the note explicitly "
+            "states about payout frequency and split, what happens to (a) the split percentage applied when "
+            "this second request IS eventually processed, and (b) whether this second request can be paid out "
+            "within the same month at all?\n"
+            "A) (a) The 90/10 split still applies, unchanged by request count; (b) the note states some firms allow only twice per month, so a second request within the same month may still be payable depending on the firm's specific limit, which the note does not specify beyond \"varies\"\n"
+            "B) (a) The split drops to 80/20 for any second request in the same month; (b) it can be paid immediately\n"
+            "C) (a) The split becomes 100/0 in the trader's favor as a loyalty bonus; (b) it cannot ever be paid out\n"
+            "D) (a) The 90/10 split still applies; (b) the note explicitly states a hard maximum of exactly two payouts total per account, ever"
+        ),
+        "options": ["A", "B", "C", "D"],
+        "correct": 0,
+        "bare_letters": True,
+        # Nested trap: two separate, genuinely note-supported facts
+        # (split percentage is a fixed property of the firm's terms, not
+        # something that changes per-request; payout frequency "varies
+        # by prop firm -- e.g. some allow only twice per month" is an
+        # EXAMPLE figure, not a universal hard rule) have to be tracked
+        # correctly and NOT over-extended. D is the most tempting
+        # distractor because "twice per month" is a real phrase from the
+        # note, but the note gives it as an example of how frequency
+        # varies (via "e.g."), not as a universal maximum applying to
+        # every firm or as a lifetime cap rather than a per-month one.
+    },
+]
+
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
     "quiz1": QUIZ_1_FOREX_BROKERS,
@@ -912,6 +1312,9 @@ QUIZ_SESSIONS = {
     "cla_8d": CLA_8D,
     "section_8_quiz": SECTION_8_QUIZ,
     "section_9_quiz": SECTION_9_QUIZ,
+    "cla_10a": CLA_10A,
+    "cla_10b": CLA_10B,
+    "cla_10c": CLA_10C,
 }
 
 TOTAL_QUESTIONS = 5
