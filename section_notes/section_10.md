@@ -44,7 +44,7 @@ Rules vary between prop firms, but the following are common/standard across the 
 ## 5. Important Clarification: What "Funded" Actually Means?
 - Common misconception: people assume that once you pass the challenge and become "funded," you're given an account with **real money**, and profits you make are shared with the firm from that real trading.
 - **This is not accurate.** The account you're actually given after passing, in **most prop firms**, is a **Demo account**.
-- Because it's technically a Demo account, the "profit" you generate there is **not real profit**. What you're being paid out with later is **not literally your trading gains** — it's money the firm pays you **out of their own pocket**.
+- Because it's technically a Demo account, the "profit" you generate there is **not real profit**. What you're being paid out with later is **not literally your trading gains** — it's money the firm pays you **out of their own pocket, which eventually comes from the evaluation fee everyone pays**.
 - Some (**rare**) prop firms do eventually convert genuinely consistent traders to **live/real accounts** after they've demonstrated strong ongoing consistency — but this is very as uncommon; the majority of firms keep the funded trader on a Demo account and pay them out of pocket.
 
 ## 6. The Actual Business Model of Prop Firms
