@@ -894,6 +894,160 @@ SECTION_9_QUIZ = [
     },
 ]
 
+# -- Claude-generated quizzes for Section 10 (How Prop Firms Work), from
+# section_10.md. Per the cla_<N><letter> convention (see CLA_7A/CLA_7B and
+# CLA_8A-CLA_8D comment blocks above). Per user's explicit request
+# (2026-09-14): three 5-question sets, each a different flavor of
+# difficulty. IMPORTANT per user feedback on an earlier draft of these same
+# three quizzes: keep questions SHORT and genuinely INCOMPLETE/ambiguous --
+# do NOT spell out the trap, the relevant rule, or the reasoning inside the
+# question stem itself (e.g. never "using the ORIGINAL account size as the
+# fixed basis, not a recalculated one" -- that just hands the model the
+# answer). The model has to notice the gap on its own, same as how the
+# real live section_9_quiz question ("smallest contract size... across ALL
+# account types") gives no hint that Cent accounts matter -- the ambiguity
+# has to come from what's LEFT OUT, not from extra explanatory text.
+#
+#   CLA_10A = tricky calculations with tricky specifiers -- modeled on the
+#   user's own section_9 example (a less careful model answers "0.01 lot"
+#   without checking every account type the question implies). Q1 here
+#   is the closest analogue: the note's own daily-drawdown rule is framed
+#   as "cannot lose MORE THAN X" -- losing exactly the limit amount is a
+#   genuine literal-wording boundary case the question deliberately does
+#   not flag. Q3 is the section-10 structural analogue of the cent/lot
+#   trap: a single bigger profitable day vs. the actual "3 separate days"
+#   requirement.
+#
+#   CLA_10B = exploits genuine ambiguity/incompleteness in the note's own
+#   wording -- short, direct questions with no scaffolding, per the same
+#   style precedent as CLA_8A-D (distractors are real facts from
+#   elsewhere in the note, not invented wrong answers).
+#
+#   CLA_10C = "complicate it as much as you like" (user's own words) --
+#   stacks multiple facts/rules a reader must track at once, but still
+#   phrased tersely rather than walked through step by step.
+CLA_10A = [
+    {
+        "text": "A $10,000 account loses $500 in one day. Does this fail the evaluation?",
+        "options": ["Yes", "No", "Only if it's also the total drawdown limit", "Not enough information"],
+        "correct": 1,
+        "bare_letters": False,
+        # Trap: the note frames the rule as "cannot lose MORE THAN X" --
+        # losing exactly $500 (5% of $10,000) is, on the literal wording,
+        # not a breach. The question deliberately doesn't restate that
+        # framing, so a shallow read latches onto "$500 = the limit,
+        # therefore fail" without checking whether hitting the limit
+        # exactly still counts.
+    },
+    {
+        "text": "Account size $10,000. How much can you lose in total before failing?",
+        "options": ["$9,000", "$500", "$1,000", "$10,000"],
+        "correct": 2,
+        "bare_letters": False,
+        # Trap: $9,000 is the FLOOR balance, not the loss amount -- easy
+        # to answer the adjacent-but-different quantity the note also
+        # states in the same example.
+    },
+    {
+        "text": "A trader is profitable on one day by 1.5%, then flat the rest of the month. Does this satisfy the Consistency Rule?",
+        "options": ["Only for 1-step evaluations", "Depends on the firm", "Yes", "No"],
+        "correct": 3,
+        "bare_letters": False,
+        # Trap: 1.5% sounds generous relative to the ~0.5%/day bar, but
+        # the rule requires 3 SEPARATE profitable days, not one larger
+        # day -- the direct section-10 analogue of the user's cent/lot
+        # example (surface number looks sufficient, structure says
+        # otherwise).
+    },
+    {
+        "text": "Which of these is a real account size mentioned in the module?",
+        "options": ["$1,000", "$25,000", "$50,000", "$75,000"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "1-step evaluation, $10,000 account. What's the total drawdown limit?",
+        "options": ["Slightly more than 10%", "10%", "Exactly 8%", "Slightly less than 10%"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+]
+
+CLA_10B = [
+    {
+        "text": "What is a trader actually paid from, once funded?",
+        "options": ["Their own Demo profits", "A shared trader pool", "The firm's own money", "Their evaluation fee, refunded"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "Did My Forex Funds actually manipulate prices, or is that just suspected of prop firms generally?",
+        "options": ["Never addressed in the note", "Confirmed specifically for them", "True of all prop firms", "Only suspected, never confirmed"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+    {
+        "text": "Are \"additional rules\" and \"hidden rules\" the same thing?",
+        "options": ["Only once funded", "Yes", "Only during evaluation", "No"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+    {
+        "text": "Do firms that disclose Demo accounts also tend to convert traders to live accounts?",
+        "options": ["Yes", "Sometimes", "Not addressed", "No"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "Whose money funds a specific trader's payout?",
+        "options": ["The firm's investments", "Their own fee", "Other funded traders", "Everyone's fees"],
+        "correct": 3,
+        "bare_letters": False,
+    },
+]
+
+CLA_10C = [
+    {
+        "text": (
+            "$50,000 account, 5% daily / 10% total drawdown. Day 3 closing loss for the day is $2,400, "
+            "from a balance that was already down $2,000 from Day 2. Any limit breached?"
+        ),
+        "options": ["Total only", "Neither", "Both", "Daily only"],
+        "correct": 1,
+        "bare_letters": False,
+        # Nested: daily = 5% of $50,000 = $2,500 cap, Day 3's $2,400 is
+        # under it. Total floor = 10% of $50,000 = $45,000; balance after
+        # Day 3 is $49,000 - $2,400 = $46,600, still above it. Neither is
+        # breached, both with narrow margin -- the numbers are close
+        # enough that a rough guess (rather than an actual calculation)
+        # is likely to get this wrong in either direction.
+    },
+    {
+        "text": "A funded trader's Consistency Rule violation is found a month after payout. What happens?",
+        "options": ["Account taken, nothing said about the payout", "Nothing, too late", "Account taken, payout clawed back", "Must requalify"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "2-step uses 10% total drawdown. If 1-step is 8%, how much more room does 2-step give, in dollars, on a $10,000 account?",
+        "options": ["Can't be determined", "$0", "$200", "$100"],
+        "correct": 2,
+        "bare_letters": False,
+    },
+    {
+        "text": "Is My Forex Funds proof that all prop firms manipulate prices?",
+        "options": ["No, but it fits the incentive described", "Yes", "No connection at all", "Only true of unregulated firms"],
+        "correct": 0,
+        "bare_letters": False,
+    },
+    {
+        "text": "Second payout same month, 90/10 split. What changes?",
+        "options": ["Hard 2-per-account-ever cap", "Nothing about split; frequency limit depends on the firm", "Payout blocked entirely", "Split changes"],
+        "correct": 1,
+        "bare_letters": False,
+    },
+]
+
 # Each quiz stays together as its own fixed 5-question set, matching how
 # they were really presented -- not shuffled or mixed with the others.
 QUIZ_SESSIONS = {
@@ -912,6 +1066,9 @@ QUIZ_SESSIONS = {
     "cla_8d": CLA_8D,
     "section_8_quiz": SECTION_8_QUIZ,
     "section_9_quiz": SECTION_9_QUIZ,
+    "cla_10a": CLA_10A,
+    "cla_10b": CLA_10B,
+    "cla_10c": CLA_10C,
 }
 
 TOTAL_QUESTIONS = 5
