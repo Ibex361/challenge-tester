@@ -28,6 +28,16 @@ jobs:
   complete-login:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions/download-artifact@v4's cross-run download (via run-id below)
+    # needs actions:read on the token it's given -- without this block,
+    # github.token's default scope (especially on repos with "Read
+    # repository contents" as the default workflow permission, rather than
+    # the older broader default) doesn't include it, and the download
+    # fails with a bare "Not Found" rather than a clearer permissions
+    # error. Fixed 2026-09-14 after hitting exactly this on a real run.
+    permissions:
+      actions: read
+      contents: read
 
     steps:
       - name: Checkout repository
