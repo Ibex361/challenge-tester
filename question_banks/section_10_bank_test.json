@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "Question bank for bulk AI-answer testing (test_ai_on_bank.py).",
+    "Add as many questions as you want -- there's no fixed count like",
+    "the 5-question quizzes in test_bot.py.",
+    "",
+    "Each entry:",
+    "  id       -- stable number/string you'll reference later in",
+    "              'deep investigate' mode to re-ask just that question.",
+    "              Keep these stable once assigned -- don't renumber",
+    "              existing entries, or old miss-reports will point at",
+    "              the wrong question next time you run bulk mode.",
+    "  text     -- the question. For bare-letter style (options embedded",
+    "              in the question, like the real bot's Q1/Q5), write the",
+    "              'A) ...' / 'B) ...' lines directly into this string,",
+    "              same as test_bot.py's bare_letters questions do.",
+    "  options  -- list of option strings. For bare-letter style, this is",
+    "              just [\"A\", \"B\", \"C\", \"D\"] (see bare_letters below) --",
+    "              same convention test_bot.py already uses.",
+    "  correct  -- 0-based index into options of the right answer.",
+    "  bare_letters -- true if options are embedded in text (see above),",
+    "              false if options holds the real option text.",
+    "",
+    "This mirrors test_bot.py's existing question dict shape exactly, so",
+    "the same _build_prompt() / _options_are_bare_letters() logic in",
+    "run_challenge.py applies unchanged."
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "text": "What is a trader actually paid from, once funded?",
+      "options": [
+        "The trader's own deposited money",
+        "A separate bonus pool",
+        "The firm's own money",
+        "Money frozen from other traders"
+      ],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 2,
+      "text": "Do firms that disclose Demo accounts also tend to convert to live accounts?\nA) Yes, always\nB) Only sometimes\nC) Not addressed\nD) No",
+      "options": ["A", "B", "C", "D"],
+      "correct": 2,
+      "bare_letters": true
+    }
+  ]
+}

@@ -960,6 +960,48 @@ def _build_prompt(question_text: str, options: list[str]) -> str:
     )
 
 
+def _build_explain_prompt(question_text: str, options: list[str]) -> str:
+    """
+    Deep-investigate variant of _build_prompt(): same question/options
+    formatting (reuses the exact same bare_letters detection and options
+    block so the model sees an identical question either way -- only the
+    requested output shape differs), but asks for a SHORT reasoning
+    alongside the letter instead of the letter alone.
+
+    Used only by test_ai_on_bank.py's "investigate" mode to explain a
+    handful of already-known-wrong questions -- not part of the live
+    answering flow, which stays letter-only (cheaper, faster, and not
+    what StageFailure's retry logic expects to parse).
+    """
+    extra = f" {PROMPT_EXTRA_INSTRUCTION}" if PROMPT_EXTRA_INSTRUCTION else ""
+    notes_block = f"Reference notes for this section:\n{SECTION_NOTES_TEXT}\n\n" if SECTION_NOTES_TEXT else ""
+
+    if _options_are_bare_letters(options):
+        options_block = (
+            f"The {len(options)} answer choices ({', '.join(_LETTERS[:len(options)])}) "
+            "are written directly in the question text above (e.g. \"A) ...\", \"B) ...\")."
+        )
+    else:
+        cleaned = []
+        for i, opt in enumerate(options):
+            letter = _LETTERS[i] if i < len(_LETTERS) else ""
+            cleaned.append(_strip_redundant_letter_prefix(opt, letter) if letter else opt.strip())
+        lettered = "\n".join(f"{_LETTERS[i]}) {opt}" for i, opt in enumerate(cleaned))
+        options_block = f"Options:\n{lettered}"
+
+    return (
+        f"{notes_block}"
+        "You are answering a multiple-choice question. First reason through "
+        "it briefly -- 2-3 sentences at most, no more -- then give your final "
+        f"answer letter.{extra}\n\n"
+        f"Question: {question_text}\n\n"
+        f"{options_block}\n\n"
+        'Respond with ONLY a JSON object of the exact form '
+        '{"reasoning": "<2-3 sentences max>", "answer": "<letter>"}. '
+        "No markdown code fences, nothing before or after the JSON object."
+    )
+
+
 def _log_gemini_usage(resp, attempt_label: str) -> None:
     """
     Gemini equivalent of _log_groq_usage -- logs prompt/thoughts/candidates/
@@ -1726,6 +1768,150 @@ def ask_ai_for_answer(question_text: str, options: list[str], attempt_label: str
     if AI_PROVIDER == "openrouter":
         return ask_openrouter_for_answer(question_text, options, attempt_label)
     return ask_gemini_for_answer(question_text, options, attempt_label, q_num)
+
+
+# ----------------------------------------------------------------------
+# Explain-mode answering -- used only by test_ai_on_bank.py's "investigate"
+# mode, never by the live challenge flow. Each ask_*_for_answer_explained()
+# below is the explain-prompt counterpart of its letter-only sibling above:
+# same client/model/reasoning_effort selection, but built around
+# _build_explain_prompt() and a schema with a "reasoning" field, since the
+# live functions' strict answer-only schemas (see ask_gemini_for_answer's
+# response_schema and ask_groq_for_answer's json_schema above) have no room
+# for reasoning text at all -- there's no way to get it out of those calls
+# as they're shaped today. Each returns (letter, reasoning); reasoning may
+# be "" if the model returned an empty string for it, but never None.
+# ----------------------------------------------------------------------
+
+def ask_gemini_for_answer_explained(question_text: str, options: list[str], q_num: int) -> tuple[str, str]:
+    """Explain-mode counterpart of ask_gemini_for_answer(). No retry loop
+    (this is a one-off diagnostic call, not part of the timed live flow) --
+    raises StageFailure directly on an unparseable response."""
+    key_name, gemini_client = _gemini_clients[(q_num - 1) % len(_gemini_clients)]
+    valid_letters = _LETTERS[: len(options)]
+    prompt = _build_explain_prompt(question_text, options)
+
+    generation_config = genai_types.GenerateContentConfig(
+        temperature=0,
+        response_mime_type="application/json",
+        response_schema={
+            "type": "OBJECT",
+            "properties": {
+                "reasoning": {"type": "STRING"},
+                "answer": {"type": "STRING", "enum": valid_letters},
+            },
+            "required": ["reasoning", "answer"],
+        },
+        thinking_config=genai_types.ThinkingConfig(thinking_level=THINKING_LEVEL),
+        max_output_tokens=1000,  # headroom for a few sentences of reasoning + thinking tokens
+        automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+    resp = gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt, config=generation_config)
+    _log_gemini_usage(resp, f"Gemini investigate ({key_name})")
+    raw = (resp.text or "").strip()
+    try:
+        parsed = json.loads(raw)
+        letter = str(parsed.get("answer", "")).strip().upper()
+        reasoning = str(parsed.get("reasoning", "")).strip()
+    except Exception:
+        letter, reasoning = "", ""
+
+    if letter not in valid_letters:
+        reason = _gemini_finish_reason(resp)
+        raise StageFailure(
+            "Gemini investigate",
+            f"could not get a valid answer+reasoning (finish_reason={reason}, raw={raw[:300]!r})",
+        )
+    return letter, reasoning
+
+
+def ask_groq_for_answer_explained(question_text: str, options: list[str], q_num: int) -> tuple[str, str]:
+    """Explain-mode counterpart of ask_groq_for_answer(). Always uses
+    json_object mode (not json_schema) regardless of
+    GROQ_JSON_SCHEMA_UNSUPPORTED_MODELS, since the schema here (two string
+    fields, one enum) is simple enough to spell out in the prompt itself
+    (_build_explain_prompt already does this) -- one code path for every
+    Groq model rather than branching same as the live answering flow does."""
+    key_name, groq_client = _groq_clients[(q_num - 1) % len(_groq_clients)]
+    valid_letters = _LETTERS[: len(options)]
+    prompt = _build_explain_prompt(question_text, options)
+
+    groq_kwargs = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_completion_tokens": 2000,  # reasoning text + JSON wrapper, generous headroom
+        "response_format": {"type": "json_object"},
+    }
+    if GROQ_REASONING_EFFORT is not None:
+        groq_kwargs["reasoning_effort"] = GROQ_REASONING_EFFORT
+
+    resp = groq_client.chat.completions.create(**groq_kwargs)
+    _log_groq_usage(resp, f"Groq investigate ({key_name})")
+    choice = resp.choices[0]
+    raw = (choice.message.content or "").strip()
+    try:
+        parsed = json.loads(raw)
+        letter = str(parsed.get("answer", "")).strip().upper()
+        reasoning = str(parsed.get("reasoning", "")).strip()
+    except Exception:
+        letter, reasoning = "", ""
+
+    if letter not in valid_letters:
+        finish_reason = getattr(choice, "finish_reason", None)
+        raise StageFailure(
+            "Groq investigate",
+            f"could not get a valid answer+reasoning (finish_reason={finish_reason}, raw={raw[:300]!r})",
+        )
+    return letter, reasoning
+
+
+def ask_openrouter_for_answer_explained(question_text: str, options: list[str]) -> tuple[str, str]:
+    """Explain-mode counterpart of ask_openrouter_for_answer(). Same
+    json_object approach as ask_groq_for_answer_explained, applied to
+    OpenRouter's OpenAI-compatible client."""
+    valid_letters = _LETTERS[: len(options)]
+    prompt = _build_explain_prompt(question_text, options)
+
+    kwargs = {
+        "model": OPENROUTER_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_completion_tokens": 2000,
+        "response_format": {"type": "json_object"},
+    }
+    if OPENROUTER_REASONING_EFFORT is not None:
+        kwargs["reasoning_effort"] = OPENROUTER_REASONING_EFFORT
+
+    resp = _openrouter_client.chat.completions.create(**kwargs)
+    choice = resp.choices[0]
+    raw = (choice.message.content or "").strip()
+    try:
+        parsed = json.loads(raw)
+        letter = str(parsed.get("answer", "")).strip().upper()
+        reasoning = str(parsed.get("reasoning", "")).strip()
+    except Exception:
+        letter, reasoning = "", ""
+
+    if letter not in valid_letters:
+        finish_reason = getattr(choice, "finish_reason", None)
+        raise StageFailure(
+            "OpenRouter investigate",
+            f"could not get a valid answer+reasoning (finish_reason={finish_reason}, raw={raw[:300]!r})",
+        )
+    return letter, reasoning
+
+
+def ask_ai_for_answer_explained(question_text: str, options: list[str], q_num: int) -> tuple[str, str]:
+    """Explain-mode counterpart of ask_ai_for_answer() -- same provider
+    dispatch by AI_PROVIDER, returns (letter, reasoning) instead of just
+    letter. Used only by test_ai_on_bank.py's "investigate" mode."""
+    if AI_PROVIDER == "groq":
+        return ask_groq_for_answer_explained(question_text, options, q_num)
+    if AI_PROVIDER == "openrouter":
+        return ask_openrouter_for_answer_explained(question_text, options)
+    return ask_gemini_for_answer_explained(question_text, options, q_num)
 
 
 # ----------------------------------------------------------------------
