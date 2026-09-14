@@ -1087,8 +1087,31 @@ TEST_QUIZ_SELECTION = os.environ.get("TEST_QUIZ_SELECTION", "random").lower()
 #   "questions": [...], "index": int,
 #   "started_at": float | None,  # time.monotonic() when Q1 was sent (quiz clock starts here)
 #   "correct_count": int,        # right answers so far
+#   "wrong_answers": [           # one entry per missed question, in order answered
+#     {"q_index": int, "chosen": int, "correct": int}, ...
+#   ],
 # }
 _sessions: dict[int, dict] = {}
+
+
+def format_option(q: dict, option_index: int) -> str:
+    """
+    Render one option of a question the same way regardless of button
+    style, for use in the post-quiz wrong-answer summary.
+
+    For bare_letters=False questions, q["options"][i] holds real option
+    text, so we show "A) <text>". For bare_letters=True questions,
+    q["options"] is just ["A", "B", "C", ...] -- the real text is already
+    embedded inside q["text"] itself (e.g. "...\nB) The bank sells...").
+    Re-showing q["options"][i] there would just print a bare letter again,
+    which adds nothing. In that case we show only the letter, since the
+    full option text is already visible in the original question message
+    the tester can scroll up to -- no need to duplicate or re-parse it.
+    """
+    letter = LETTERS[option_index]
+    if q.get("bare_letters"):
+        return letter
+    return f"{letter}) {q['options'][option_index]}"
 
 
 def build_question_message(q_index: int, questions: list[dict]) -> tuple[str, InlineKeyboardMarkup]:
@@ -1226,6 +1249,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "index": 0,
         "started_at": None,  # set right below, when Q1 actually goes out
         "correct_count": 0,
+        "wrong_answers": [],
     }
 
     welcome_text = (
@@ -1287,8 +1311,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Session expired -- send /start again.")
             return
 
-        if chosen == session["questions"][q_index]["correct"]:
+        correct = session["questions"][q_index]["correct"]
+        if chosen == correct:
             session["correct_count"] += 1
+        else:
+            session["wrong_answers"].append(
+                {"q_index": q_index, "chosen": chosen, "correct": correct}
+            )
 
         next_index = q_index + 1
         if next_index < TOTAL_QUESTIONS:
@@ -1325,11 +1354,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ai_bits.append(f"thinking: {TEST_THINKING_LEVEL}")
                 ai_info_line = f"AI: {' | '.join(ai_bits)}\n"
 
+            # Wrong-answer review -- omitted entirely on a perfect score
+            # (nothing to show), not shown as an empty section. Each line
+            # is question number + chosen + correct, rendered via
+            # format_option() so bare-letter and full-text question
+            # styles both come out readable without duplicating text
+            # that's already visible further up in the chat.
+            review_block = ""
+            wrong_answers = session.get("wrong_answers") or []
+            if wrong_answers:
+                questions = session["questions"]
+                lines = ["", "❌ Missed:"]
+                for entry in wrong_answers:
+                    q = questions[entry["q_index"]]
+                    q_num = entry["q_index"] + 1
+                    chosen_str = format_option(q, entry["chosen"])
+                    correct_str = format_option(q, entry["correct"])
+                    lines.append(f"Q{q_num}: you picked {chosen_str} — correct: {correct_str}")
+                review_block = "\n".join(lines) + "\n"
+
             await query.message.reply_text(
                 "🏁 Challenge complete! (TEST)\n"
                 f"Score: {score}/{TOTAL_QUESTIONS}\n"
                 f"Time: {time_str}\n"
                 f"{ai_info_line}"
+                f"{review_block}"
                 "Thanks for testing."
             )
             _sessions.pop(chat_id, None)
