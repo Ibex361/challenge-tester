@@ -19,7 +19,7 @@ Rules vary between prop firms, but the following are common/standard across the 
 ### Daily Drawdown
 - A limit on how much you can lose **in a single day**. Framed as: "you cannot lose more than X in one day" — designed to force proper risk management.
 - **Most common daily drawdown limit: 5%.**
-- Example given on daily drawdown rule: for a $10,000 account, 5% = $500 → you cannot lose more than $500 in a single day. If you lose more than $500 within one day, the evaluation is failed — the challenge money is not refunded, and you'd need to purchase another challenge to try again.
+- Example given on daily drawdown rule: for a $10,000 account, 5% = $500 → you cannot lose more than $500 in a single day ($500 is fine, but more is not). If you lose more than $500 within one day, the evaluation is failed — the challenge money is not refunded, and you'd need to purchase another challenge to try again.
 
 ### Total Drawdown
 - A separate, overall loss limit for the account (not per-day).
@@ -31,12 +31,12 @@ Rules vary between prop firms, but the following are common/standard across the 
 - This rule requires that you remain **profitable across multiple separate days** — not all in one trade/day. This rule is not universal across all firms, but is common.
 - Common implementation: an account must be profitable on **at least 3 separate days**. 
 - Most firms define "profitable day" as growing the account balance by a minimum amount (commonly by around **0.5%**).
-- Some prop firms additionally require trading on **at least a minimum number of days** to pass a given phase.
-- Rule specifics vary by prop firm, but these (Daily Drawdown, Total Drawdown, Consistency Rule) represent the **common industry-standard rules**. Individual firms may add their own additional rules on top of these.
+- Some (rare number) prop firms additionally require trading on **at least a minimum number of days** to pass a given phase.
+- Rule specifics vary by prop firm, but these (Daily Drawdown, Total Drawdown, Consistency Rule) represent the **common industry-standard rules**, which you must obey to get funded or be eligible for a payout. Individual firms may add their own additional rules on top of these.
 
 ## 4. What Happens Once You Pass?
 - Once you pass the evaluation phase(s), you are given an account with the money — e.g., if you purchased/participated with a $10,000-size challenge, you are given a $10,000 account to trade with.
-- The same rules from the evaluation **still apply** after becoming funded — you must continue trading within those rules; breaking them will result in your funded account being taken away.
+- The same rules from the evaluation generally **still apply** after becoming funded — you must continue trading within those rules; breaking them will result in your funded account being taken away.
 - Once profitable without breaching the rules, you can **request a payout** of that profit.
 - **Payout frequency** varies by prop firm — e.g., some allow only **twice per month**.
 - **Profit split** when requesting payout also varies by firm — again the **common industry standard is 80/20**: you take **80%**, the firm takes **20%**. Some firms offer **90/10** (you take 90%, they take 10%).
@@ -44,12 +44,12 @@ Rules vary between prop firms, but the following are common/standard across the 
 ## 5. Important Clarification: What "Funded" Actually Means?
 - Common misconception: people assume that once you pass the challenge and become "funded," you're given an account with **real money**, and profits you make are shared with the firm from that real trading.
 - **This is not accurate.** The account you're actually given after passing, in **most prop firms**, is a **Demo account**.
-- Because it's technically a Demo account, the "profit" you generate there is **not real profit**. What you're being paid out with later is **not literally your trading gains** — it's money the firm pays you **out of their own pocket, which eventually comes from the evaluation fee everyone pays**.
+- Because it's technically a Demo account, the "profit" you generate there is **not real profit**. What you're being paid out with later is **not literally your trading gains** — it's money the firm pays you **out of the profit they get from evaluation fees**.
 - Some (**rare**) prop firms do eventually convert genuinely consistent traders to **live/real accounts** after they've demonstrated strong ongoing consistency — but this is very as uncommon; the majority of firms keep the funded trader on a Demo account and pay them out of pocket.
 
 ## 6. The Actual Business Model of Prop Firms
 - At the surface level, it might seem prop firms want profitable trader so that they would get more splits from the traders' profit. But this is not true because the traders are on Demo. If lots of good traders were funded and made lots of profit, this would cost the firm through payouts.
-- **The actual business model**: revenue comes primarily from the **challenge/evaluation fees** people pay to enter. Generally, roughly **90%+** of new traders **fail** in trading. That challenge fee is treated as **profit** for the firm.
+- **The actual business model**: revenue comes primarily from the **challenge/evaluation fees** people pay to enter. Remember, roughly **90%+** of new traders **fail** in trading. That challenge fee is treated as **profit** for the firm.
 - When a trader becomes profitable in prop firms and requests payouts, it's from **that challenge-fee profit pool** that firms pay out to the trader— i.e., you become an **expense** paid for out of the money collected from everyone.
 - Because of this business model, it is reasonable to suspect manipulators in the market. Some firms could have an incentive to prevent a consistently profitable trader from continuing to be profitable — since a profitable trader represents an ongoing expense for the firm.
 
