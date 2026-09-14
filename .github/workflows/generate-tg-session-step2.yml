@@ -1,0 +1,57 @@
+name: "Generate TG Session (2/2: Complete Login)"
+
+on:
+  # Manual only -- run AFTER "Generate TG Session (1/2: Request Code)" has
+  # completed and you've received the login code from Telegram (check the
+  # Telegram app itself first -- a message from the official "Telegram"
+  # service account -- SMS is only a fallback after a short delay).
+  # You must supply the SAME run's artifact from step 1 below (GitHub
+  # Actions can't pass an artifact between workflows automatically -- see
+  # the "Download intermediate session state" step).
+  workflow_dispatch:
+    inputs:
+      step1_run_id:
+        description: "Run ID of the step-1 workflow run that requested this code (visible in that run's URL, e.g. .../actions/runs/1234567890)"
+        type: string
+        required: true
+      code:
+        description: "The login code Telegram sent you"
+        type: string
+        required: true
+      password:
+        description: "Cloud password, ONLY if this account has Two-Step Verification enabled. Leave blank otherwise."
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  complete-login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install telethon==1.36.0
+
+      - name: Download intermediate session state from step 1
+        uses: actions/download-artifact@v4
+        with:
+          name: tg-session-step1-state
+          run-id: ${{ github.event.inputs.step1_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Complete Telegram login
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_CODE: ${{ github.event.inputs.code }}
+          TG_PASSWORD: ${{ github.event.inputs.password }}
+        run: python generate_session_step2_complete_login.py

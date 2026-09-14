@@ -1,0 +1,56 @@
+name: "Generate TG Session (1/2: Request Code)"
+
+on:
+  # Manual only -- run this whenever you need to generate a NEW
+  # StringSession for a Telegram account (e.g. to fill in a fresh
+  # <ACCOUNT>_TG_SESSION secret like AB62_TG_SESSION/AB82_TG_SESSION).
+  # This exists because run_challenge.py's own login (client.start()) only
+  # works with an ALREADY-valid session -- if the session is empty/invalid,
+  # Telethon falls back to an interactive input() prompt for phone/code,
+  # which has no stdin to answer on a GitHub Actions runner and crashes
+  # with EOFError. This workflow (+ step 2) does the same phone+code login
+  # Telethon normally asks for interactively, just split across two
+  # separate manual runs so you have time to actually receive the code
+  # between them. Generic -- works for any phone number/account, not tied
+  # to a specific <ACCOUNT>_TG_SESSION secret name.
+  workflow_dispatch:
+    inputs:
+      phone_number:
+        description: "Phone number to log in as, in international format (e.g. +15551234567)"
+        type: string
+        required: true
+
+jobs:
+  request-code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install telethon==1.36.0
+
+      - name: Request Telegram login code
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          PHONE_NUMBER: ${{ github.event.inputs.phone_number }}
+        run: python generate_session_step1_request_code.py
+
+      - name: Upload intermediate session state
+        uses: actions/upload-artifact@v4
+        with:
+          name: tg-session-step1-state
+          path: session_step1_state.json
+          # Short retention on purpose -- this state (and the Telegram code
+          # it corresponds to) is only useful for a few minutes anyway, and
+          # it's meaningless without the code, so there's nothing sensitive
+          # worth keeping around longer.
+          retention-days: 1
