@@ -278,7 +278,25 @@ TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 #                    entry point and the "too early" message are EAT-
 #                    facing. Replaces the old CHALLENGE_OPEN_TIME_UTC
 #                    secret (2026-09-07 -- removed as redundant once this
-#                    file existed).
+#                    file existed). Keyed per account (2026-09-16) -- all
+#                    accounts (SAF/ETH/Ab62/Ab82) live in ONE object here,
+#                    each with its own open_time_eat, plus a required
+#                    "default" fallback for any account not explicitly
+#                    listed -- e.g.:
+#                      {"default": {"open_time_eat": "8:00:00 PM"},
+#                       "Ab62":    {"open_time_eat": "8:00:01 PM"}}
+#                    Deliberately one file, not one-per-account like
+#                    pacing (control/pacing_<account>.json) -- with only
+#                    a single time value per account (vs. pacing's 6+
+#                    keys), one shared file means every account's open
+#                    time is visible and editable side by side, without
+#                    hunting across N files for a 1-second tweak. Reads
+#                    the same ACCOUNT_NAME as pacing (see
+#                    PACING_CONFIG_NAME below) -- resolved from the
+#                    workflow's "account" dropdown, no separate selector.
+#                    Old flat shape ({"open_time_eat": "..."}) is still
+#                    accepted for one release, applied to every account
+#                    alike, so an unmigrated file doesn't hard-fail.
 #   - test mode  -> TEST_ACTIVATION_TIME_UTC        (whatever you set when
 #                    you start the test bot, e.g. "13:00" -- test_bot.py
 #                    enforces the exact same gate on its side, so test mode
@@ -306,6 +324,15 @@ CHALLENGE_CLOSED_TEXT = "This challenge ended at"
 # is a safe fixed offset rather than something that needs a timezone
 # database lookup.
 EAT_UTC_OFFSET_HOURS = 3
+
+# The same account-identifying knob pacing uses (PACING_CONFIG_NAME,
+# defined further below) -- read here under its own name since open-time
+# loading happens earlier in the file than pacing's definition, and this
+# avoids a forward reference. Both read the identical env var (set by the
+# workflow's "account" dropdown via steps.resolve_account.outputs.account,
+# see run-challenge.yml) -- intentionally NOT unified into one shared
+# constant, to keep this diff isolated from pacing's already-working code.
+ACCOUNT_NAME = os.environ.get("PACING_CONFIG_NAME", "SAF")
 
 EAT_TIME_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "control", "challenge_open_time.json")
 
@@ -336,8 +363,8 @@ def _parse_12h_eat_time(text: str) -> tuple[int, int, int]:
 
 def _load_challenge_open_time_utc() -> tuple[str, str]:
     """
-    Reads control/challenge_open_time.json (open_time_eat, 12-hour EAT
-    with required seconds) and returns (utc_str, eat_str):
+    Reads control/challenge_open_time.json for ACCOUNT_NAME's open_time_eat
+    (12-hour EAT with required seconds) and returns (utc_str, eat_str):
       - utc_str is the equivalent UTC time as "HH:MM:SS", ready for
         today_utc_at() -- the same string shape CHALLENGE_OPEN_TIME_UTC
         used to be, so nothing downstream needs to change to stay
@@ -348,6 +375,15 @@ def _load_challenge_open_time_utc() -> tuple[str, str]:
         actually recognizes -- alongside/instead of UTC. Every
         deadline/retry computation still runs on utc_str internally;
         eat_str is display-only.
+
+    File shape is per-account, mirroring pacing's "default" convention:
+      {"default": {"open_time_eat": "8:00:00 PM"},
+       "Ab62":    {"open_time_eat": "8:00:01 PM"}}
+    ACCOUNT_NAME is looked up directly; any account not given its own key
+    falls back to "default", which is required. The old flat shape
+    ({"open_time_eat": "..."}) is also still accepted, applied to every
+    account alike -- a one-release migration allowance so an unmigrated
+    file doesn't hard-fail.
 
     Like pacing config, this is required and fails loudly (_fail_config)
     on anything missing/malformed rather than silently falling back --
@@ -365,14 +401,34 @@ def _load_challenge_open_time_utc() -> tuple[str, str]:
     except json.JSONDecodeError as e:
         _fail_config("Startup config", f"control/challenge_open_time.json is not valid JSON: {e}")
 
-    if not isinstance(raw, dict) or "open_time_eat" not in raw:
+    if not isinstance(raw, dict):
         _fail_config(
             "Startup config",
-            'control/challenge_open_time.json must be a JSON object with an "open_time_eat" key, '
-            'e.g. {"open_time_eat": "8:00:01 PM"}.',
+            'control/challenge_open_time.json must be a JSON object, e.g. '
+            '{"default": {"open_time_eat": "8:00:01 PM"}}.',
         )
 
-    eat_str = raw["open_time_eat"]
+    # Old flat shape: {"open_time_eat": "..."} -- one value for every
+    # account. Detected by the presence of "open_time_eat" as a top-level
+    # key (the per-account shape never has that key at the top level).
+    if "open_time_eat" in raw:
+        entry = raw
+    else:
+        entry = raw.get(ACCOUNT_NAME, raw.get("default"))
+        if entry is None:
+            _fail_config(
+                "Startup config",
+                f'control/challenge_open_time.json has no entry for account {ACCOUNT_NAME!r} and no '
+                '"default" fallback. Add one, e.g. {"default": {"open_time_eat": "8:00:01 PM"}}.',
+            )
+        if not isinstance(entry, dict) or "open_time_eat" not in entry:
+            _fail_config(
+                "Startup config",
+                f'control/challenge_open_time.json: entry for account {ACCOUNT_NAME!r} (or "default") must be '
+                'an object with an "open_time_eat" key, e.g. {"open_time_eat": "8:00:01 PM"}.',
+            )
+
+    eat_str = entry["open_time_eat"]
     try:
         eat_hour, eat_minute, eat_second = _parse_12h_eat_time(eat_str)
     except ValueError as e:
@@ -380,7 +436,7 @@ def _load_challenge_open_time_utc() -> tuple[str, str]:
 
     utc_hour = (eat_hour - EAT_UTC_OFFSET_HOURS) % 24
     utc_str = f"{utc_hour:02d}:{eat_minute:02d}:{eat_second:02d}"
-    print(f"[challenge open time] Loaded {EAT_TIME_CONFIG_PATH}: {eat_str} EAT -> {utc_str} UTC")
+    print(f"[challenge open time] Loaded {EAT_TIME_CONFIG_PATH} for account {ACCOUNT_NAME!r}: {eat_str} EAT -> {utc_str} UTC")
     return utc_str, eat_str
 
 

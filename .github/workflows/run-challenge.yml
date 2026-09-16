@@ -349,6 +349,9 @@ jobs:
           # separate pacing-file selector to set; choosing an account
           # implies its matching pacing file, per user's explicit
           # requirement (2026-09-06, extended to Ab62/Ab82 2026-09-11).
+          # Also used as the account key into control/challenge_open_time.json
+          # (2026-09-16) -- same PACING_CONFIG_NAME env var, read under its
+          # own name there; no separate open-time-account selector either.
           account="${{ github.event.inputs.account || 'SAF' }}"
           case "$account" in
             SAF) session="$SAF_TG_SESSION" ;;
