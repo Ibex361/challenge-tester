@@ -1,0 +1,149 @@
+{
+  "_comment": [
+    "Question bank for bulk AI-answer testing (test_ai_on_bank.py).",
+    "Covers Section 11: Trading Platforms + MT5 Mobile Supplement.",
+    "20 short, deliberately terse/ambiguous questions."
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "text": "How many order types does MT4 really have?",
+      "options": ["One", "Two", "Three", "Unclear"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 2,
+      "text": "Best platform for analysis?",
+      "options": ["MetaTrader", "TradingView", "cTrader", "Exness Terminal"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 3,
+      "text": "EAs work on mobile?",
+      "options": ["Yes", "No", "Only MT5 mobile", "Only with a broker's permission"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 4,
+      "text": "Which platform has its own scripting for indicators, not just bots?",
+      "options": ["MetaTrader", "TradingView", "cTrader", "Exness Terminal"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 5,
+      "text": "IC Markets and TradingView — what's true?",
+      "options": ["Full execution support", "Data only, not confirmed for execution", "No connection at all", "Only cTrader link exists"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 6,
+      "text": "What decides Stop vs Limit when dragging?",
+      "options": ["Buy or Sell choice", "Lot size", "Drop position vs price", "Which tab you're on"],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 7,
+      "text": "Drag below price to sell — what order?",
+      "options": ["Sell Limit", "Sell Stop", "Not covered", "Buy Limit"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 8,
+      "text": "Partial close of 0.1 to 0.05 — where does it show?",
+      "options": ["Deals only", "Somewhere in history", "Positions only", "Nowhere"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 9,
+      "text": "Which view merges entry and exit into one row?",
+      "options": ["Orders", "Deals", "Positions", "All three"],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 10,
+      "text": "Can MT4 touch non-forex instruments at all?",
+      "options": ["Never", "Slowly, yes", "Only via EAs", "Not addressed"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 11,
+      "text": "Path to add a broker?",
+      "options": ["Trade > Settings > Add", "Settings > Trade Accounts > +", "Quotes > Edit > +", "Chart > Instrument > Search"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 12,
+      "text": "Exness server group name?",
+      "options": ["Exness Ethiopia Ltd", "Exness Technologies Ltd", "Exness Trade Ltd", "Exness Global Ltd"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 13,
+      "text": "Same password for demo and real?",
+      "options": ["Yes", "No", "Not mentioned", "Only for real accounts"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 14,
+      "text": "Bigger number, top-right — ask or bid?",
+      "options": ["Bid", "Ask", "Neither", "Depends on instrument"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 15,
+      "text": "Is cTrader required for ECN?",
+      "options": ["Yes", "Depends on broker", "No connection stated", "Only for scalpers"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 16,
+      "text": "Not something Exness lets you do:",
+      "options": ["View charts", "Place orders", "Code EAs in its own language", "Skip MetaTrader entirely"],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 17,
+      "text": "2007, one platform only — which?",
+      "options": ["MT5", "MT4", "Either", "Neither existed"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 18,
+      "text": "Does MetaTrader have charts at all?",
+      "options": ["No charts", "Yes, just not the main tool", "Only on desktop", "Removed in MT5"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 19,
+      "text": "Two batch-close options?",
+      "options": ["Pending / market", "Losing / profitable", "Buy / sell", "Orders / deals"],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 20,
+      "text": "Where are EAs actually built, per the note?",
+      "options": ["Chart tab drawing tool", "Desktop, not shown on mobile", "Anywhere, syncs across devices", "Settings tab"],
+      "correct": 1,
+      "bare_letters": false
+    }
+  ]
+}
