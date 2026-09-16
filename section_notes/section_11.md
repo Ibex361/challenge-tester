@@ -32,13 +32,13 @@
 - TradingView is a large organization with **many data vendors (brokers)**. Example given: viewing a **Gold** chart, you could compare the chart from **IC Markets**, **Pepperstone**, **FXCM**, or from **futures markets / CME** — a lot of multiple data source options are available.
 - It's described as the **major platform used for charting**.
 - TradingView has its own **community**: you can **publish your own ideas/chart analyses**, other people can **follow** you and view them, you can **comment**, and view other people's analyses. You can see analyst videos, and news from various sources. 
-- **TradingView can also be used for execution** (placing orders) — but this depends on whether your broker supports integration with TradingView. Example given: brokers such as **IC Market** and **Pepperstone** can be integrated with TradingView. 
+- **TradingView can also be used for execution** (placing orders) — but this depends on whether your broker supports integration with TradingView. Example given: brokers such as **IC Market** and **Pepperstone** support integration with TradingView. 
 - As with MetaTrader, TradingView also supports **Expert Advisor-type automation** and **custom indicators**: it has its own coding language called **Pine Script**.
 - Summary: most traders use TradingView for **charting** and **community/news provider**, while using **MetaTrader for execution**.
 
 ### C. cTrader
 - It is newer and **more modern alternative** to MetaTrader. It is not part of MetaTrader — but it serves a similar purpose, mostly used **for execution**.
-- Some brokers (e.g. IC Market) allow trading through cTrader, in addition to MetaTrader; **most brokers use MetaTrader**.
+- Some brokers allow trading through cTrader. E.g. IC Markets allows cTrader along with MetaTrader and Tradingview; **most brokers use MetaTrader**.
 - **cTrader specifically tends to be used for ECN-level accounts** (ECN accounts have row/zero spread, execution goes directly to the network).
 - Since it is newer, cTrader has a strong/good server, and good execution speed — particularly suited to **scalping**.
 - Like the other platforms, cTrader also supports integrating **Expert Advisors / trading bots** and coding custom strategies into it.
@@ -51,7 +51,7 @@
 - General note: **many more options are emerging over time** as brokers build out their own tools, but the **common industry-standard applications remain**: **MetaTrader** (for execution), **TradingView** (for charting), and **cTrader** (for ECN-level execution).
 - Which specific app you end up using also depends on your **broker** — e.g. Exness is common in Ethiopia, if you use Exness, the **Exness App** and **Exness Terminal** are good options.
 ***
-# Supplement — MT5 Mobile App Walkthrough
+# Supplement to Section 11 — MT5 Mobile App Walkthrough
 
 - On first opening the app with no account added, MT5 defaults to offering its **own demo account** — you dismiss this to connect your actual broker instead.
 - To connect a broker: **Settings → Trade Accounts → "+"** → search and select your broker.
