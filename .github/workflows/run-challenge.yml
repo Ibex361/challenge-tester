@@ -102,6 +102,10 @@ on:
         description: "Groq model override (e.g. openai/gpt-oss-20b). Leave blank to use the script's default."
         type: string
         default: ""
+      groq_fallback_model:
+        description: "Optional Groq fallback model (e.g. openai/gpt-oss-120b). If groq_model exhausts all its retry attempts on a question (e.g. a rate limit), that question retries on this model instead; the next question still starts on groq_model. Leave blank to disable fallback (old behavior)."
+        type: string
+        default: ""
       openrouter_model:
         description: "OpenRouter model override (e.g. openai/gpt-oss-20b:free). Leave blank to use the script's default (deepseek/deepseek-v4-flash:free)."
         type: string
@@ -431,6 +435,12 @@ jobs:
             echo "Using GROQ_MODEL override: $GROQ_MODEL"
           else
             echo "No groq_model input given -- using the script's built-in default"
+          fi
+          if [ -n "${{ github.event.inputs.groq_fallback_model }}" ]; then
+            export GROQ_FALLBACK_MODEL="${{ github.event.inputs.groq_fallback_model }}"
+            echo "Using GROQ_FALLBACK_MODEL: $GROQ_FALLBACK_MODEL"
+          else
+            echo "No groq_fallback_model input given -- fallback disabled (old behavior)"
           fi
           if [ -n "${{ github.event.inputs.openrouter_model }}" ]; then
             export OPENROUTER_MODEL="${{ github.event.inputs.openrouter_model }}"
