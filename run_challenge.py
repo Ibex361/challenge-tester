@@ -418,18 +418,6 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # preferred over accuracy again.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b")
 
-# Optional. When set, ask_groq_for_answer() retries a question on THIS
-# model (fresh set of attempts, its own reasoning_effort/json_schema
-# support resolved the same way GROQ_MODEL's is below) if every attempt
-# against GROQ_MODEL for that question fails -- see GROQ_MAX_ATTEMPTS and
-# ask_groq_for_answer's fallback block. Falling back is scoped to the
-# single question that triggered it; the NEXT question starts again on
-# GROQ_MODEL, only falling back again itself if it independently exhausts
-# its own attempts. Blank/unset (the default) preserves old behavior
-# exactly -- a question that exhausts GROQ_MODEL's attempts with no
-# fallback configured still raises StageFailure as before.
-GROQ_FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "").strip() or None
-
 # deepseek/deepseek-v4-flash:free -- confirmed live and $0/M in+out on
 # OpenRouter as of 2026-09-11 (openrouter.ai/deepseek/deepseek-v4-flash:free,
 # released Apr 24, 2026): 284B total / 13B active MoE, 1M context, "strong
@@ -627,15 +615,6 @@ GROQ_REASONING_EFFORT = _resolve_groq_reasoning_effort(GROQ_MODEL, THINKING_LEVE
 # ask_groq_for_answer branches its response_format/prompt/token-budget on
 # this rather than hardcoding json_schema unconditionally.
 GROQ_SUPPORTS_JSON_SCHEMA = _groq_model_supports_json_schema(GROQ_MODEL)
-
-# Number of attempts _call_groq() makes against ONE model (GROQ_MODEL, or
-# GROQ_FALLBACK_MODEL once falling back) before giving up on it and either
-# trying the fallback model (if configured) or raising StageFailure.
-# Raised from 3 to 5 on 2026-09-15 for extra margin against Groq's OTPM
-# rate limit (see context.json decisions_and_preferences around that date)
-# -- the 0.5s sleep between attempts is unchanged, so this only adds delay
-# on a run that's already failing repeatedly, never on a normal success.
-GROQ_MAX_ATTEMPTS = int(os.environ.get("GROQ_MAX_ATTEMPTS", "5"))
 
 # Same idea for OpenRouter -- see OPENROUTER_REASONING_SCHEMES and
 # _resolve_reasoning_effort above.
@@ -1264,29 +1243,24 @@ def _log_groq_usage(resp, stage: str) -> None:
     log(stage, "INFO", f"token usage -- {', '.join(parts)}")
 
 
-def _ask_groq_for_answer_with_model(
-    model: str, groq_client, question_text: str, options: list[str], attempt_label: str,
-) -> str:
+def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
     """
-    Does the actual work of asking ONE specific Groq model for an answer,
-    with up to GROQ_MAX_ATTEMPTS attempts against the given client. Split
-    out of ask_groq_for_answer() so that function can call this once for
-    GROQ_MODEL and, on total failure, once more for GROQ_FALLBACK_MODEL
-    (if configured) -- see ask_groq_for_answer's docstring for the
-    fallback contract. Raises StageFailure if this model doesn't produce
-    a valid letter within its attempts; does NOT know about the fallback
-    model at all, so it can be reused unchanged for either one.
+    Groq equivalent of ask_gemini_for_answer(). Same shape, same return
+    value (a single option letter), so the call site doesn't need to know
+    which provider is in use.
 
-    reasoning_effort and json_schema-support are resolved fresh from
-    `model` here (via the same _resolve_groq_reasoning_effort /
-    _groq_model_supports_json_schema helpers used at startup for
-    GROQ_MODEL) rather than reusing the module-level GROQ_REASONING_EFFORT
-    / GROQ_SUPPORTS_JSON_SCHEMA constants, since those are specific to
-    GROQ_MODEL and would be wrong for a different fallback model family.
+    q_num (1-based question number) picks which of the configured Groq
+    accounts handles this call, round-robin (q_num - 1) % len(_groq_clients)
+    -- spreads the ~2000+ input tokens/call (SECTION_NOTES attached in
+    full each time) across separate accounts/ITPM quotas so consecutive
+    questions never stack against the same account's rate limit. Logging
+    which key answered is just a print() (see log()) -- no extra network
+    call, so this adds no latency.
     """
+    key_name, groq_client = _groq_clients[(q_num - 1) % len(_groq_clients)]
+    log(f"Groq answer ({attempt_label})", "INFO", f"using {key_name}")
+
     valid_letters = _LETTERS[: len(options)]
-    reasoning_effort = _resolve_groq_reasoning_effort(model, THINKING_LEVEL)
-    supports_json_schema = _groq_model_supports_json_schema(model)
 
     # groq/compound (and any future model in GROQ_JSON_SCHEMA_UNSUPPORTED_
     # MODELS) rejects response_format=json_schema outright with a 400 --
@@ -1316,7 +1290,7 @@ def _ask_groq_for_answer_with_model(
     #      tool-call/reasoning and any letter found in it is coincidental,
     #      not a real answer -- treat it as unparseable rather than risk
     #      silently submitting a wrong guess scraped from truncated text.
-    if supports_json_schema:
+    if GROQ_SUPPORTS_JSON_SCHEMA:
         prompt = _build_prompt(question_text, options)
         response_format = {
             "type": "json_schema",
@@ -1346,43 +1320,44 @@ def _ask_groq_for_answer_with_model(
         max_completion_tokens = 2000
 
     def _call_groq():
+        max_attempts = 3
         last_error = None
         # Some model families (groq/compound) reject reasoning_effort
-        # outright, even set to "none"/"default" -- reasoning_effort is
-        # None for those (see GROQ_REASONING_SCHEMES), and the parameter
+        # outright, even set to "none"/"default" -- GROQ_REASONING_EFFORT
+        # is None for those (see GROQ_REASONING_SCHEMES), and the parameter
         # must be left out of kwargs entirely rather than passed as None,
         # since the SDK would otherwise still send it.
         groq_kwargs = {
-            "model": model,
+            "model": GROQ_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
             "max_completion_tokens": max_completion_tokens,
             "response_format": response_format,
         }
-        if reasoning_effort is not None:
-            groq_kwargs["reasoning_effort"] = reasoning_effort
-        for attempt in range(1, GROQ_MAX_ATTEMPTS + 1):
+        if GROQ_REASONING_EFFORT is not None:
+            groq_kwargs["reasoning_effort"] = GROQ_REASONING_EFFORT
+        for attempt in range(1, max_attempts + 1):
             try:
                 return groq_client.chat.completions.create(**groq_kwargs)
             except Exception as e:
                 last_error = e
-                if attempt < GROQ_MAX_ATTEMPTS:
+                if attempt < max_attempts:
                     log(
                         f"Groq answer ({attempt_label})",
                         "INFO",
-                        f"[{model}] API call failed ({e.__class__.__name__}: {_describe_groq_error(e)}), "
-                        f"retrying (attempt {attempt}/{GROQ_MAX_ATTEMPTS})",
+                        f"API call failed ({e.__class__.__name__}: {_describe_groq_error(e)}), "
+                        f"retrying (attempt {attempt}/{max_attempts})",
                     )
                     time.sleep(0.5)
         raise StageFailure(
             f"Groq answer ({attempt_label})",
-            f"[{model}] Groq API call failed after {GROQ_MAX_ATTEMPTS} attempts: "
+            f"Groq API call failed after {max_attempts} attempts: "
             f"{last_error.__class__.__name__}: {_describe_groq_error(last_error)}",
         )
 
     def _try_once():
         resp = _call_groq()
-        _log_groq_usage(resp, f"Groq answer ({attempt_label}) [{model}]")
+        _log_groq_usage(resp, f"Groq answer ({attempt_label})")
         choice = resp.choices[0]
         raw = (choice.message.content or "").strip()
         try:
@@ -1391,7 +1366,7 @@ def _ask_groq_for_answer_with_model(
         except Exception:
             letter = ""
         if letter not in valid_letters:
-            # See the docstring-level comment above supports_json_schema's
+            # See the docstring-level comment above GROQ_SUPPORTS_JSON_SCHEMA's
             # branch above (point 3) for why finish_reason=="length" is
             # checked before falling back to a regex scan -- same
             # reasoning as _ask_openai_compatible_for_answer's identical
@@ -1404,7 +1379,7 @@ def _ask_groq_for_answer_with_model(
                 log(
                     f"Groq answer ({attempt_label})",
                     "INFO",
-                    f"[{model}] response was truncated (finish_reason='length', likely the "
+                    f"response was truncated (finish_reason='length', likely the "
                     f"model's full completion-token budget was spent on reasoning "
                     f"and/or tool calls) -- treating as unparseable rather than "
                     f"scanning it for a letter (raw content: {raw[:200]!r})",
@@ -1418,70 +1393,19 @@ def _ask_groq_for_answer_with_model(
 
     letter = _try_once()
     if letter in valid_letters:
-        log(f"Groq answer ({attempt_label})", "OK", f"[{model}] chose {letter}")
+        log(f"Groq answer ({attempt_label})", "OK", f"chose {letter}")
         return letter
 
-    log(f"Groq answer ({attempt_label})", "INFO", f"[{model}] unparseable response '{letter}', retrying once")
+    log(f"Groq answer ({attempt_label})", "INFO", f"unparseable response '{letter}', retrying once")
     letter = _try_once()
     if letter in valid_letters:
-        log(f"Groq answer ({attempt_label}, retry)", "OK", f"[{model}] chose {letter}")
+        log(f"Groq answer ({attempt_label}, retry)", "OK", f"chose {letter}")
         return letter
 
     raise StageFailure(
         f"Groq answer ({attempt_label})",
-        f"[{model}] could not get a valid option letter after retry (last raw value: {letter!r})",
+        f"could not get a valid option letter after retry (last raw value: {letter!r})",
     )
-
-
-def ask_groq_for_answer(question_text: str, options: list[str], attempt_label: str, q_num: int) -> str:
-    """
-    Groq equivalent of ask_gemini_for_answer(). Same shape, same return
-    value (a single option letter), so the call site doesn't need to know
-    which provider is in use.
-
-    q_num (1-based question number) picks which of the configured Groq
-    accounts handles this call, round-robin (q_num - 1) % len(_groq_clients)
-    -- spreads the ~2000+ input tokens/call (SECTION_NOTES attached in
-    full each time) across separate accounts/ITPM quotas so consecutive
-    questions never stack against the same account's rate limit. Logging
-    which key answered is just a print() (see log()) -- no extra network
-    call, so this adds no latency.
-
-    FALLBACK MODEL (added 2026-09-15): if GROQ_FALLBACK_MODEL is set and
-    GROQ_MODEL exhausts all GROQ_MAX_ATTEMPTS attempts for THIS question
-    (a StageFailure from the inner API-call retry loop -- rate limits,
-    timeouts, etc. -- not the separate unparseable-response retry, which
-    is unaffected), this question is retried against GROQ_FALLBACK_MODEL
-    on the SAME Groq account/client (q_num's round-robin choice is
-    unchanged -- only the model name changes, not which key answers).
-    The fallback gets its own fresh GROQ_MAX_ATTEMPTS budget. If the
-    fallback also exhausts its attempts, the fallback's StageFailure is
-    what propagates (it's the more recent, more relevant failure).
-
-    Falling back is scoped to ONE question: the very next question starts
-    again on GROQ_MODEL from scratch, per user's explicit requirement --
-    a bad model/account pairing on Question 2 doesn't permanently switch
-    the rest of the run to the fallback model. If GROQ_FALLBACK_MODEL is
-    unset (the default), behavior is identical to before this change: a
-    StageFailure from GROQ_MODEL propagates immediately.
-    """
-    key_name, groq_client = _groq_clients[(q_num - 1) % len(_groq_clients)]
-    log(f"Groq answer ({attempt_label})", "INFO", f"using {key_name}")
-
-    try:
-        return _ask_groq_for_answer_with_model(GROQ_MODEL, groq_client, question_text, options, attempt_label)
-    except StageFailure as primary_failure:
-        if not GROQ_FALLBACK_MODEL:
-            raise
-        log(
-            f"Groq answer ({attempt_label})",
-            "INFO",
-            f"{GROQ_MODEL} exhausted all {GROQ_MAX_ATTEMPTS} attempts for this question "
-            f"({primary_failure.detail}) -- falling back to GROQ_FALLBACK_MODEL="
-            f"{GROQ_FALLBACK_MODEL} for this question only; the next question will "
-            f"start again on {GROQ_MODEL}",
-        )
-        return _ask_groq_for_answer_with_model(GROQ_FALLBACK_MODEL, groq_client, question_text, options, attempt_label)
 
 
 def _ask_openai_compatible_for_answer(
