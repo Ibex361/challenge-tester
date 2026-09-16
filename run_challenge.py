@@ -1223,6 +1223,57 @@ def _describe_groq_error(e: Exception) -> str:
     return _clean(str(e))
 
 
+def _log_groq_rate_limits(stage: str, model: str, max_completion_tokens: int, headers) -> None:
+    """
+    Logs Groq's own OTPM/RPM rate-limit bookkeeping on EVERY call -- success
+    or failure -- not just when a 429 already happened. Added 2026-09-15 per
+    the user's explicit request ("log the requested token always"), covering
+    both halves of that ask:
+
+      Option A -- Groq sends x-ratelimit-* headers on every response (per
+      https://console.groq.com/docs/rate-limits), not only on a 429. Logging
+      them here means the log shows exactly how much OTPM/RPM headroom was
+      left right after THIS call, on every question, so a near-miss is
+      visible before it becomes an actual RateLimitError.
+
+      Option B -- max_completion_tokens (the budget this specific call was
+      configured with) is logged alongside the headers, since that's the
+      number that most directly drives Groq's own pre-flight cost estimate
+      (confirmed: the "Requested" figure in a 429 body tracks the configured
+      ceiling, not the tokens actually generated -- see _describe_groq_error
+      and this conversation's 1300/1158/1183 comparison). Printing both
+      together on one line is what makes the headers actionable: "remaining
+      780 of 1000, this call asked for up to 1300" tells you immediately
+      that the CONFIGURED ceiling, not live model behavior, is what's
+      putting the account at risk.
+
+    `headers` is a plain httpx.Headers (case-insensitive) -- passed in
+    rather than re-derived here, since the two call sites get it two
+    different ways: the success path uses groq_client.chat.completions.
+    with_raw_response.create(...) (an APIResponse wrapper exposing .headers
+    before .parse()-ing the body), and the failure path reads
+    e.response.headers directly off the caught APIStatusError. Missing
+    headers (an older SDK/proxy that doesn't forward them, or a header
+    Groq hasn't set yet) are logged as "n/a" rather than raising --
+    this is observational logging, never allowed to break the actual
+    answer-getting flow.
+    """
+    if headers is None:
+        return
+    remaining_tokens = headers.get("x-ratelimit-remaining-tokens", "n/a")
+    limit_tokens = headers.get("x-ratelimit-limit-tokens", "n/a")
+    reset_tokens = headers.get("x-ratelimit-reset-tokens", "n/a")
+    remaining_requests = headers.get("x-ratelimit-remaining-requests", "n/a")
+    limit_requests = headers.get("x-ratelimit-limit-requests", "n/a")
+    log(
+        stage,
+        "INFO",
+        f"[{model}] rate limits -- tokens: {remaining_tokens}/{limit_tokens} remaining "
+        f"(resets in {reset_tokens}) | requests: {remaining_requests}/{limit_requests} remaining "
+        f"| this call's max_completion_tokens={max_completion_tokens}",
+    )
+
+
 def _log_groq_usage(resp, stage: str) -> None:
     """
     Logs actual token usage from a Groq/OpenAI-compatible-SDK response --
@@ -1363,9 +1414,31 @@ def _ask_groq_for_answer_with_model(
             groq_kwargs["reasoning_effort"] = reasoning_effort
         for attempt in range(1, GROQ_MAX_ATTEMPTS + 1):
             try:
-                return groq_client.chat.completions.create(**groq_kwargs)
+                # with_raw_response (not the plain .create()) so the
+                # x-ratelimit-* headers are visible on a SUCCESSFUL call
+                # too, not only inside a 429's exception -- see
+                # _log_groq_rate_limits' docstring for why this matters
+                # (Option A). .parse() turns it back into the normal
+                # ChatCompletion object every caller downstream already
+                # expects, so nothing else about this function's return
+                # value changes.
+                raw = groq_client.chat.completions.with_raw_response.create(**groq_kwargs)
+                _log_groq_rate_limits(
+                    f"Groq answer ({attempt_label})", model, max_completion_tokens, raw.headers,
+                )
+                return raw.parse()
             except Exception as e:
                 last_error = e
+                # Same headers, read off the exception's own response
+                # instead -- a 429 (and most other 4xx/5xx) still carries
+                # them, per Groq's docs, so a failing call is just as
+                # visible as a successful one (Option A applies to both).
+                _log_groq_rate_limits(
+                    f"Groq answer ({attempt_label})",
+                    model,
+                    max_completion_tokens,
+                    getattr(getattr(e, "response", None), "headers", None),
+                )
                 if attempt < GROQ_MAX_ATTEMPTS:
                     log(
                         f"Groq answer ({attempt_label})",
@@ -1923,12 +1996,34 @@ def ask_groq_for_answer_explained(question_text: str, options: list[str], q_num:
     if GROQ_REASONING_EFFORT is not None:
         groq_kwargs["reasoning_effort"] = GROQ_REASONING_EFFORT
 
-    resp = groq_client.chat.completions.create(**groq_kwargs)
+    # with_raw_response so rate-limit headers are visible here too (see
+    # _log_groq_rate_limits) -- this call has no retry loop of its own
+    # (investigate mode is a one-shot deep-dive, not the live-answering
+    # path), so this is the ONLY chance to see the headers for it; on a
+    # RateLimitError (the exact failure this was added for -- see the
+    # qwen3.6-27b 1000 OTPM ceiling investigation) they're read off the
+    # exception's own .response instead, then the exception still
+    # propagates unchanged (no new error handling added here beyond the
+    # logging itself).
+    try:
+        raw_response = groq_client.chat.completions.with_raw_response.create(**groq_kwargs)
+    except Exception as e:
+        _log_groq_rate_limits(
+            f"Groq investigate ({key_name})",
+            GROQ_MODEL,
+            groq_kwargs["max_completion_tokens"],
+            getattr(getattr(e, "response", None), "headers", None),
+        )
+        raise
+    _log_groq_rate_limits(
+        f"Groq investigate ({key_name})", GROQ_MODEL, groq_kwargs["max_completion_tokens"], raw_response.headers,
+    )
+    resp = raw_response.parse()
     _log_groq_usage(resp, f"Groq investigate ({key_name})")
     choice = resp.choices[0]
-    raw = (choice.message.content or "").strip()
+    raw_content = (choice.message.content or "").strip()
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw_content)
         letter = str(parsed.get("answer", "")).strip().upper()
         reasoning = str(parsed.get("reasoning", "")).strip()
     except Exception:
@@ -1938,7 +2033,7 @@ def ask_groq_for_answer_explained(question_text: str, options: list[str], q_num:
         finish_reason = getattr(choice, "finish_reason", None)
         raise StageFailure(
             "Groq investigate",
-            f"could not get a valid answer+reasoning (finish_reason={finish_reason}, raw={raw[:300]!r})",
+            f"could not get a valid answer+reasoning (finish_reason={finish_reason}, raw={raw_content[:300]!r})",
         )
     return letter, reasoning
 
