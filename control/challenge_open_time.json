@@ -1,5 +1,14 @@
 {
   "default": {
     "open_time_eat": "8:00:00 PM"
+  },
+  "Ab62": {
+    "open_time_eat": "8:00:03 PM"
+  },
+  "SAF": {
+    "open_time_eat": "8:00:04 PM"
+  },
+  "ETH": {
+    "open_time_eat": "8:00:05 PM"
   }
 }
