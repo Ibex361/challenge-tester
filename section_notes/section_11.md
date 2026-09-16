@@ -38,7 +38,7 @@
 
 ### C. cTrader
 - It is newer and **more modern alternative** to MetaTrader. It is not part of MetaTrader — but it serves a similar purpose, mostly used **for execution**.
-- Some brokers allow trading through cTrader. E.g. IC Markets allows cTrader along with MetaTrader and Tradingview; **most brokers use MetaTrader**.
+- Some brokers allow trading through cTrader. E.g. IC Markets allows execution on cTrader along with MetaTrader and Tradingview; **most brokers use MetaTrader**.
 - **cTrader specifically tends to be used for ECN-level accounts** (ECN accounts have row/zero spread, execution goes directly to the network).
 - Since it is newer, cTrader has a strong/good server, and good execution speed — particularly suited to **scalping**.
 - Like the other platforms, cTrader also supports integrating **Expert Advisors / trading bots** and coding custom strategies into it.
