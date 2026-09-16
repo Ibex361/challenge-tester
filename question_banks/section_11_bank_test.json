@@ -1,0 +1,249 @@
+{
+  "_comment": [
+    "Question bank for bulk AI-answer testing (test_ai_on_bank.py).",
+    "Covers Section 11: Trading Platforms + MT5 Mobile Supplement.",
+    "20 hard/ambiguous questions targeting confusable wording in the note."
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "text": "The note says MT4 'doesn't support' Stop-Limit orders and separately says MT4 has 'only Limit and Stop' order types. Taken together, how many distinct order types does MT4 have per the note?",
+      "options": [
+        "One combined type called Stop-Limit",
+        "Two: Limit and Stop",
+        "Three: Limit, Stop, and Stop-Limit",
+        "The note doesn't actually specify a number"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 2,
+      "text": "A trader wants to place trades directly from a chart showing a Gold price feed sourced from CME futures data. Which platform's own charting is described as being used for this kind of analysis by most traders?",
+      "options": [
+        "MetaTrader, since it displays charts natively",
+        "TradingView, even though execution there depends on broker support",
+        "cTrader, since it has a strong server",
+        "The Exness Terminal, since it copied TradingView's features"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 3,
+      "text": "Per the note, Expert Advisors are available 'on the desktop version (not on mobile) only.' This restriction is stated for which platform(s)?",
+      "options": [
+        "MetaTrader only",
+        "cTrader only",
+        "Both MetaTrader and cTrader",
+        "All three platforms (MetaTrader, TradingView, cTrader)"
+      ],
+      "correct": 0,
+      "bare_letters": false
+    },
+    {
+      "id": 4,
+      "text": "Which platform does the note explicitly credit with supporting 'custom indicators' in addition to EA-style automation?",
+      "options": [
+        "MetaTrader",
+        "TradingView",
+        "cTrader",
+        "The Exness Terminal"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 5,
+      "text": "The note lists IC Markets both as a TradingView data vendor example and as a broker offering cTrader. Based strictly on the note, which statement is correct?",
+      "options": [
+        "IC Markets is the only broker mentioned that supports both TradingView execution and cTrader",
+        "The note never says IC Markets supports TradingView execution, only that its data can be viewed on TradingView charts",
+        "IC Markets only supports cTrader, not TradingView in any form",
+        "The note states IC Markets exclusively uses the Exness Terminal"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 6,
+      "text": "According to the note, what determines whether a graphical order dragged onto the MT5 chart becomes a Stop or a Limit order?",
+      "options": [
+        "Whether the trader selects Buy or Sell first",
+        "The lot size chosen before dragging",
+        "Where the line is dropped relative to the current price",
+        "Whether it's placed from the Chart tab or the Trade tab"
+      ],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 7,
+      "text": "The supplement says dragging a line 'above current price sets a Buy Stop.' Based on the note's stated logic (not outside knowledge), what would dragging a line below current price set, if the trader intends to sell?",
+      "options": [
+        "Sell Limit",
+        "Sell Stop",
+        "The note doesn't cover this case",
+        "Buy Limit"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 8,
+      "text": "A position of 0.1 lots is partially closed at 0.05 lots. Per the note, how is this reflected across History views?",
+      "options": [
+        "It appears as a partial in Deals only, never in Orders",
+        "It appears as a partial in the History record generally, per the Partial close description",
+        "It is merged with the remaining 0.05 in the Positions view but shown separately in the Orders view",
+        "Both B and C reflect what the note actually distinguishes"
+      ],
+      "correct": 3,
+      "bare_letters": false
+    },
+    {
+      "id": 9,
+      "text": "Which History view, per the note, would show a single trade's entry and exit combined into one row rather than as separate records?",
+      "options": [
+        "Orders",
+        "Deals",
+        "Positions",
+        "Both Orders and Deals combine them identically"
+      ],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 10,
+      "text": "The note says MT4 is 'more focused specifically on Forex/currency trading' and 'slowly integrating non-forex instruments,' while MT5 'supports currencies, stock, indices, crypto, metals, basically every instrument.' Does the note state that MT4 cannot trade any non-forex instruments at all?",
+      "options": [
+        "Yes, MT4 is described as forex-only with zero exceptions",
+        "No — the note says MT4 is integrating non-forex instruments, just remains forex-focused",
+        "The note is silent on whether MT4 supports any non-forex instruments",
+        "Yes, only MT5 was ever given non-forex instruments per the note"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 11,
+      "text": "Per the note, connecting a broker in the MT5 app requires navigating through which sequence?",
+      "options": [
+        "Trade tab → Settings → Add Account",
+        "Settings → Trade Accounts → \"+\"",
+        "Quotes tab → Edit → \"+\"",
+        "Chart tab → Instrument → Search Broker"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 12,
+      "text": "For an Exness connection in Ethiopia, the note says the trader must select a specific server group name. Which of these matches what the note states, exactly?",
+      "options": [
+        "Exness Ethiopia Ltd",
+        "Exness Technologies Ltd",
+        "Exness Trade Technologies",
+        "Exness Global Ltd"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 13,
+      "text": "Does the note say a trader's demo account password and their real (live) account password are the same, if both are held under one Exness login?",
+      "options": [
+        "Yes, one password covers all sub-accounts",
+        "No — each account (demo or real) has its own separate password",
+        "The note doesn't mention demo account passwords at all",
+        "Only real accounts get separate passwords; demo shares the main login"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 14,
+      "text": "The note distinguishes the Quotes tab's ask/bid display. Per the note, which is shown larger and in which position?",
+      "options": [
+        "Bid, top-right",
+        "Ask, top-right",
+        "Ask, bottom-left",
+        "Both are shown the same size, just in different corners"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 15,
+      "text": "cTrader is described as being 'recommended particularly for people using ECN accounts and scalpers.' Does the note claim cTrader is required for ECN accounts, or only broker-dependent?",
+      "options": [
+        "Required — ECN accounts cannot function without cTrader",
+        "Broker-dependent — the note says 'if your broker allows it'",
+        "The note doesn't connect cTrader to broker availability at all",
+        "cTrader is described as mandatory only for scalpers, optional for ECN"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 16,
+      "text": "Which of these does the note NOT list as something you can do via the Exness Terminal or Exness App, according to Section 3?",
+      "options": [
+        "View Exness-branded charting that copied TradingView's features",
+        "Execute orders directly",
+        "Code Expert Advisors using Exness's own scripting language",
+        "Trade without using MetaTrader, cTrader, or TradingView at all"
+      ],
+      "correct": 2,
+      "bare_letters": false
+    },
+    {
+      "id": 17,
+      "text": "The note claims MT5 was launched 'around 2010' and MT4 'around 2005.' If a broker in 2007 only offered one MetaTrader platform, which one would it most plausibly have been, based purely on the note's stated timeline?",
+      "options": [
+        "MT5, since it's the more advanced one",
+        "MT4, since MT5 wouldn't have existed yet per the stated dates",
+        "Either — the note says they launched simultaneously",
+        "Neither — the note states brokers only adopted MetaTrader after 2010"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 18,
+      "text": "The note states MetaTrader platforms are used 'only for execution purposes' and 'not typically used for chart analysis, even though they have charts.' What does this imply about MetaTrader's charting capability itself?",
+      "options": [
+        "MetaTrader has no charting feature at all",
+        "MetaTrader does have charts, but they aren't the tool most traders rely on for analysis",
+        "MetaTrader's charts are only visible on desktop, not mobile",
+        "MetaTrader removed charting starting with MT5"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 19,
+      "text": "In the Trade tab, batch controls exist to close positions in bulk. Per the note, what are the two batch options available?",
+      "options": [
+        "Close all pending orders / close all market orders",
+        "Close all losing positions / close all profitable positions",
+        "Close all Buy positions / close all Sell positions",
+        "Close all Orders view entries / close all Deals view entries"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    },
+    {
+      "id": 20,
+      "text": "Considering both the main note and the supplement together, which statement best reflects what the note says about where Expert Advisors can be built or used in MT5?",
+      "options": [
+        "Only within the mobile app's Chart tab, using the drawing tool",
+        "On the desktop version only, using MetaTrader's own coding language — not described as available in the mobile walkthrough",
+        "Anywhere the app is installed, since EAs sync across devices",
+        "Only through the Settings tab where accounts are added"
+      ],
+      "correct": 1,
+      "bare_letters": false
+    }
+  ]
+}
