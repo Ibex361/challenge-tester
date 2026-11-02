@@ -1,7 +1,7 @@
 name: Run Challenge Tester
 
 on:
-  # Manual only. In real mode, trigger any time from 15 minutes before
+  # Manual only. In real mode, trigger any time from 30 minutes before
   # 17:00 UTC (8:00 PM EAT) onward -- the script waits until then before
   # messaging the bot, and refuses to start at all if triggered earlier.
   # In test mode, this single workflow also starts the throwaway test bot
@@ -131,12 +131,12 @@ on:
 jobs:
   run-challenge:
     runs-on: ubuntu-latest
-    # Worst case: triggered 15 min before activation, waits ~15 min, retries
+    # Worst case: triggered 30 min before activation, waits ~30 min, retries
     # for up to 5 more min after activation, then up to QUIZ_TIMEOUT_MINUTES
-    # (15 by default) to answer the quiz, plus the test bot's own run window
-    # in test mode. Kept well above that; the script's own deadlines stop it
-    # earlier in practice.
-    timeout-minutes: 40
+    # (15 by default) to answer the quiz = ~50 min, plus the test bot's own
+    # run window in test mode. Kept well above that; the script's own
+    # deadlines stop it earlier in practice.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository

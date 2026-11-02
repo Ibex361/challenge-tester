@@ -278,25 +278,11 @@ TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 #                    entry point and the "too early" message are EAT-
 #                    facing. Replaces the old CHALLENGE_OPEN_TIME_UTC
 #                    secret (2026-09-07 -- removed as redundant once this
-#                    file existed). Keyed per account (2026-09-16) -- all
-#                    accounts (SAF/ETH/Ab62/Ab82) live in ONE object here,
-#                    each with its own open_time_eat, plus a required
-#                    "default" fallback for any account not explicitly
-#                    listed -- e.g.:
+#                    file existed). Keyed per account (2026-09-16): one
+#                    object, each account its own open_time_eat plus a
+#                    required "default" fallback, e.g.
 #                      {"default": {"open_time_eat": "8:00:00 PM"},
 #                       "Ab62":    {"open_time_eat": "8:00:01 PM"}}
-#                    Deliberately one file, not one-per-account like
-#                    pacing (control/pacing_<account>.json) -- with only
-#                    a single time value per account (vs. pacing's 6+
-#                    keys), one shared file means every account's open
-#                    time is visible and editable side by side, without
-#                    hunting across N files for a 1-second tweak. Reads
-#                    the same ACCOUNT_NAME as pacing (see
-#                    PACING_CONFIG_NAME below) -- resolved from the
-#                    workflow's "account" dropdown, no separate selector.
-#                    Old flat shape ({"open_time_eat": "..."}) is still
-#                    accepted for one release, applied to every account
-#                    alike, so an unmigrated file doesn't hard-fail.
 #   - test mode  -> TEST_ACTIVATION_TIME_UTC        (whatever you set when
 #                    you start the test bot, e.g. "13:00" -- test_bot.py
 #                    enforces the exact same gate on its side, so test mode
@@ -305,9 +291,10 @@ TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
 #                    time of your choosing instead of a fixed 17:00)
 #
 # EARLIEST_RUN_MINUTES_BEFORE_OPEN / RETRY_WINDOW_MINUTES_AFTER_OPEN are
-# shared by both modes -- 15 minutes early is too early to bother waiting
-# for, and 5 minutes of retrying after open time is enough to absorb the
-# bot being a beat late to actually activate.
+# shared by both modes -- more than 30 minutes early (raised from 15 on
+# 2026-09-16) is too early to bother waiting for, and 5 minutes of
+# retrying after open time is enough to absorb the bot being a beat late
+# to actually activate.
 CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
 # The bot's reply once a challenge has ended, e.g. "This challenge ended at
 # 2:10 PM." -- unlike CHALLENGE_NOT_ACTIVE_TEXT, retrying can NEVER help
@@ -364,7 +351,8 @@ def _parse_12h_eat_time(text: str) -> tuple[int, int, int]:
 def _load_challenge_open_time_utc() -> tuple[str, str]:
     """
     Reads control/challenge_open_time.json for ACCOUNT_NAME's open_time_eat
-    (12-hour EAT with required seconds) and returns (utc_str, eat_str):
+    (per-account with "default" fallback; 12-hour EAT with required
+    seconds) and returns (utc_str, eat_str):
       - utc_str is the equivalent UTC time as "HH:MM:SS", ready for
         today_utc_at() -- the same string shape CHALLENGE_OPEN_TIME_UTC
         used to be, so nothing downstream needs to change to stay
@@ -375,15 +363,6 @@ def _load_challenge_open_time_utc() -> tuple[str, str]:
         actually recognizes -- alongside/instead of UTC. Every
         deadline/retry computation still runs on utc_str internally;
         eat_str is display-only.
-
-    File shape is per-account, mirroring pacing's "default" convention:
-      {"default": {"open_time_eat": "8:00:00 PM"},
-       "Ab62":    {"open_time_eat": "8:00:01 PM"}}
-    ACCOUNT_NAME is looked up directly; any account not given its own key
-    falls back to "default", which is required. The old flat shape
-    ({"open_time_eat": "..."}) is also still accepted, applied to every
-    account alike -- a one-release migration allowance so an unmigrated
-    file doesn't hard-fail.
 
     Like pacing config, this is required and fails loudly (_fail_config)
     on anything missing/malformed rather than silently falling back --
@@ -408,9 +387,9 @@ def _load_challenge_open_time_utc() -> tuple[str, str]:
             '{"default": {"open_time_eat": "8:00:01 PM"}}.',
         )
 
-    # Old flat shape: {"open_time_eat": "..."} -- one value for every
-    # account. Detected by the presence of "open_time_eat" as a top-level
-    # key (the per-account shape never has that key at the top level).
+    # Per-account shape (2026-09-16): {"default": {...}, "Ab62": {...}} --
+    # ACCOUNT_NAME's entry, else the required "default". Old flat shape
+    # ({"open_time_eat": "..."}) still accepted, applied to every account.
     if "open_time_eat" in raw:
         entry = raw
     else:
@@ -446,7 +425,7 @@ if TEST_MODE:
 else:
     CHALLENGE_OPEN_TIME_UTC, CHALLENGE_OPEN_TIME_EAT = _load_challenge_open_time_utc()
 TEST_ACTIVATION_TIME_UTC = os.environ.get("TEST_ACTIVATION_TIME_UTC")                # HH:MM, UTC -- test mode
-EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "15"))
+EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "30"))
 RETRY_WINDOW_MINUTES_AFTER_OPEN = float(os.environ.get("RETRY_WINDOW_MINUTES_AFTER_OPEN", "5"))
 RETRY_INTERVAL_SECONDS = float(os.environ.get("RETRY_INTERVAL_SECONDS", "2"))
 
