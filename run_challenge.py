@@ -495,14 +495,17 @@ def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str):
     for family_substring, scheme in GROQ_REASONING_SCHEMES.items():
         if family_substring in model_lower:
             return scheme[thinking_level]
+    fallback_value = GROQ_REASONING_SCHEMES[_DEFAULT_GROQ_SCHEME_NAME][thinking_level]
     print(
-        f"[Startup] ℹ️ GROQ_MODEL '{model_name}' isn't in GROQ_REASONING_SCHEMES -- "
-        f"falling back to the '{_DEFAULT_GROQ_SCHEME_NAME}' reasoning_effort "
-        "scheme. If this model rejects that value, add a new entry to "
-        "GROQ_REASONING_SCHEMES for it.",
+        f"[Startup] ℹ️ Groq model '{model_name}' has no entry in GROQ_REASONING_SCHEMES; "
+        f"using the default '{_DEFAULT_GROQ_SCHEME_NAME}' scheme instead. This doesn't mean the "
+        f"model is automatically switched to {_DEFAULT_GROQ_SCHEME_NAME}, just the way your entry "
+        "in the workflow is mapped to the model's real thinking level. No action is needed if "
+        "the model accepts the mapped value. If the API rejects it (HTTP 400), add the correct "
+        "mapping for this model to GROQ_REASONING_SCHEMES.",
         flush=True,
     )
-    return GROQ_REASONING_SCHEMES[_DEFAULT_GROQ_SCHEME_NAME][thinking_level]
+    return fallback_value
 
 # Unified thinking/reasoning-effort control for BOTH providers, so you can
 # A/B test speed vs. correctness with one input regardless of which
@@ -518,6 +521,8 @@ def _resolve_groq_reasoning_effort(model_name: str, thinking_level: str):
 #       * qwen3.6-27b -> only "none"/"default" (a 400 on anything else,
 #         including "low"/"medium"/"high") -- it's a binary reasoning
 #         on/off switch, not a graduated dial.
+#       * qwen3.8-27b -> "none"/"default" PLUS graduated "low"/"medium"/
+#         "high" (per Groq's model page, 2026-11).
 #     GROQ_REASONING_SCHEMES below is a per-model-family lookup (matched by
 #     model-name substring) so adding a future Groq model with yet another
 #     scheme is a one-entry addition here, not new branching logic. Each
@@ -536,6 +541,14 @@ GROQ_REASONING_SCHEMES = {
         # model's own (fixed-depth) reasoning pass". Per user preference,
         # low maps to none (not default) since low signals "fast/shallow".
         "minimal": "none", "low": "none", "medium": "default", "high": "default",
+    },
+    "qwen3.8": {
+        # Unlike qwen3.6, qwen3.8 exposes graduated depth in addition to the
+        # on/off switch (per Groq's model page: "none" = instruct mode,
+        # "default" = thinking, and "low"/"medium"/"high" tune thinking
+        # depth). So low/medium/high map straight through to the real
+        # levels, and only "minimal" means "don't reason at all" ("none").
+        "minimal": "none", "low": "low", "medium": "medium", "high": "high",
     },
     "compound": {
         # groq/compound is an agentic system (tool calls/web search/code
@@ -635,13 +648,16 @@ def _resolve_reasoning_effort(model_name: str, thinking_level: str, schemes: dic
     for family_substring, scheme in schemes.items():
         if family_substring in model_lower:
             return scheme[thinking_level]
+    fallback_value = schemes[default_scheme_name][thinking_level]
     print(
-        f"[Startup] ℹ️ {provider_label} '{model_name}' isn't in its reasoning-effort "
-        f"scheme table -- falling back to the '{default_scheme_name}' scheme. If this "
-        "model rejects that value, add a new entry for it.",
+        f"[Startup] ℹ️ {provider_label} '{model_name}' has no entry in its reasoning-effort "
+        f"scheme table; using the default '{default_scheme_name}' scheme instead. With "
+        f"THINKING_LEVEL='{thinking_level}', this sends reasoning_effort={fallback_value!r}. "
+        "No action is needed if the model accepts that value. If the API rejects it "
+        "(HTTP 400), add an entry for this model to the scheme table.",
         flush=True,
     )
-    return schemes[default_scheme_name][thinking_level]
+    return fallback_value
 
 
 THINKING_LEVEL = os.environ.get("THINKING_LEVEL", "low").strip().lower()
