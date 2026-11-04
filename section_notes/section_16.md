@@ -60,8 +60,7 @@ The previous section was technical indicators. Fundamental analysis will be cove
 - Central banks can also intervene with **their own currency**, by buying it up or releasing it (reducing or increasing supply).
   - This is typical of the **Bank of Japan**: it often performs **direct currency intervention**. On the USD/JPY chart, the market moves sharply up or down when it intervenes. 
 ### 3.4 Reserve Requirement
-- A country's central bank sets a **reserve requirement** for commercial banks below it. For example: "of the deposits in those commercial banks, you must keep **10%** as reserve".
-- In other words, commercial banks must hold 10% of the amount their customers deposit as reserve. They **cannot lend or move that money**.
+- A country's central bank sets a **reserve requirement** for commercial banks below it. For example: "of the customer's deposits in those commercial banks, you must keep **10%** as reserve". They **cannot lend or move that reserve**.
 - If the central bank maximizes this (e.g., **50%** must be held), the banks lend little and release little money. This affects the economy, since activity in the economy can decline.
 - If the reserve requirement is lowered, banks **lend more**, many businesses borrow and work, and the economy is **stimulated**.
 ## 4. Geopolitics
@@ -69,37 +68,36 @@ The previous section was technical indicators. Fundamental analysis will be cove
 
 ### 4.1 Political Stability
 - Wars: the more war in a country, the more its currency is manipulated.
-- **Example: the Russia–Ukraine war** produced amazing movement in the market. On the USD–Russian ruble pair, the ruble dropped significantly, to the point that **many brokers blocked trading** on it.
+- **Example: the Russia–Ukraine war** produced movement in the market. On the USD–Russian ruble pair, the ruble dropped significantly, to the point that **many brokers blocked trading** on it.
 - When wars or instability exist, **large volatility** forms in the market. If war or instability continues in a country, its economy goes down and its currency **depreciates**.
 - When a country is **stable**, investors are attracted: it is peaceful and they can work in an orderly way, so that country's currency **appreciates** and rises.
 
 ### 4.2 Government Policy
-- Government policies can be divided into two: **fiscal policy** and **monetary policy**.
-  - **Monetary policy**: the central bank's policy, such as adjusting the interest rate. It is usually carried out by central banks.
-  - **Fiscal policy**: **tax policy and spending policies**. These have an amazing impact on the market.
-- **UK example (2022):** a woman became UK Prime Minister, **Liz Truss**, and lasted only about **40-something days**. She tried to introduce a striking fiscal policy, with big **tax reforms**. The **GBP** responded strongly and dropped a lot; the value of the pound against the USD dropped hard. She could not withstand it and left after about 40 days. The policy had not yet taken effect. It had only been proposed ("I will bring this policy change"), and that alone created an amazing impact on the market.
-- **Ethiopia example (central bank policy):** the currency valuation was **fixed**. If you remember, 1 dollar sold at around **50-something, 56 birr**. It was slowly sold at the rate set by the central bank itself. After that, the country started following a **floating policy** instead of the fixed one, and this shook the market at once.
+- Government policies can be divided into two: **fiscal** and **monetary**.
+  - **Monetary**: the central bank's policy, such as adjusting the interest rate.
+  - **Fiscal**: **tax and spending policies**. These have an amazing impact on the market.
+- **UK example (2022):** a woman became UK Prime Minister, **Liz Truss**, and lasted only about **40-something days**. She tried to introduce a striking fiscal policy, with big **tax reforms**. The **GBP** responded strongly and dropped a lot; the value of the pound against the USD dropped hard. She left after 40 days. The policy had not yet taken effect. It had only been proposed ("I will bring this policy change"), which alone created an impact.
+- **Ethiopia example:** the currency valuation was **fixed**. 1 dollar sold at around **50-something, 56 birr**. It was sold at the rate set by the central bank itself. After that, the country started following a **floating policy** instead of the fixed one, and this shook the market at once.
 - **Following policies in advance:** for example, the country was going to move to floating. The exact date of the change was not known, but we kept hearing many **rumors**. From the current trend, the policy the government seems to be pursuing suggests the birr could drop sharply against the USD. 
 ### 4.3 Elections
-- When a country holds elections, we can estimate the **probability** of who gets elected before the election. The **US election** is a very good example.
+- When a country holds elections, we can estimate the winner. The **US election** is a very good example.
 - **Trump and Kamala Harris** had campaigns that produced amazing movement in the market. As Trump's chance of winning rose, there was a big change in the dollar. As Harris's chance of winning rose, there was also a big change. There was volatility.
 - We ask: what policies will the person coming in bring, and what is he promising? If he is elected, what movement could the market have? We **predict the market before it forms** and move early.
 ### 4.4 International Relations
 - Sanctions and embargoes: when sanctions are imposed on a country, its **currency weakens**.
-- **Example: Iran.** The Iranian currency was almost devalued: it reached the point where it was said to have no value at all, in light of the sanctions imposed on it.
-- Looking at international relations like these allows us to **predict** that country's currency.
+- **Example: Iran.** The Iranian currency was almost devalued: to the point it was said to have no value at all, due to the sanctions imposed on it.
 
 ### 4.5 Disasters
-- Disasters of various kinds, natural or man-made.
-- **Best example: the Covid period.** It brought an amazing movement to the world economy, almost across all countries. It caused big volatility, whereas before, the market had been moving very slowly.
-### 4.6 Safe-Haven Assets (a related point)
-- **Safe-haven assets** include the **Japanese yen**, the **Swiss franc (CHF)**, and **gold** . They are called "safe assets": they keep their value during **wars and world events**.
-- In disasters they are **demanded by investors**. When investors don't want to take risk, because investing is risky, these assets' prices usually **rise**. People who convert their money into Swiss francs, yen, or gold keep their value.
+- Disasters of can be natural or man-made.
+- **Best example: the Covid period.** It brought an amazing movement to the world economy, almost across all countries. It caused big volatility to a previously slow moving market
+### 4.6 Safe-Haven Assets
+- **Safe-haven assets** keep their value during **wars and world events**. Example:**Japanese yen**, **Swiss franc (CHF)**, and **gold**. 
+- In disasters they are **demanded by investors**. When investors don't want to take risk, these assets' prices usually **rise**. People who convert their money into Swiss francs, yen, or gold keep their value.
 - During peace, when investors want to invest, they exit these assets, convert to other countries' currencies, and invest.
-- During wars, Covid, and economic slowdowns, when investing is risky and losses grow, investors who would otherwise go to a country to buy stocks, government bonds, or companies convert their money to yen, Swiss francs, or gold instead. The value holds for them until it passes.
-- Safe havens' values **rise in disasters** (and instabilities) because many people want to convert their money into them. When the world is stable and risk is low, their values fall somewhat, because people go to investing to make a profit.
-- **Currencies:** the **JPY and CHF** are good. They don't participate much in wars; they are **neutral**. Switzerland and the Swiss franc (CHF) were neutral even in the world wars, by geography.
-- **Swiss banks**: a very famous bank type, used by African dictators and others to hide their money. It is not risky and is safe, so people believe their money will keep its value for a long time and go untouched.
+- During wars, Covid, and economic slowdowns, when investing is risky and losses grow, investors who used to buy stocks, bonds, or companies convert their money to yen, Swiss francs, or gold instead.
+- Safe havens' values **rise in disasters** because many people want to convert their money into them. When the world is stable and less risky, their values fall, because people go to investing to make a profit.
+- **Currencies:** the **JPY and CHF** are good. They don't participate much in wars; they are **neutral**. Switzerland and the Swiss franc (CHF) were neutral even in the world wars.
+- **Swiss banks**: famously used by African dictators and others to hide their money. 
 - **Gold** is currently interesting. After Trump came to office, with the policy changes, gold's value kept appreciating strongly. When the Dollar became risky, gold's value rose a lot.
 
 ## 5. Closing
