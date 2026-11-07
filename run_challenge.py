@@ -474,7 +474,7 @@ CHALLENGE_ALREADY_STARTED_HINTS = [
 # much longer than a slow-but-working reply (~2-3s seen at open time) so it
 # can't re-create the duplicate-/start problem. 0 disables it (then silence
 # just waits for the deadline).
-START_NO_REPLY_RESEND_SECONDS = float(os.environ.get("START_NO_REPLY_RESEND_SECONDS", "20"))
+START_NO_REPLY_RESEND_SECONDS = float(os.environ.get("START_NO_REPLY_RESEND_SECONDS", "6"))
 
 OPEN_TIME_UTC = TEST_ACTIVATION_TIME_UTC if TEST_MODE else CHALLENGE_OPEN_TIME_UTC
 if TEST_MODE and not OPEN_TIME_UTC:
