@@ -2,7 +2,7 @@
   "_comment": [
     "Pacing for this account (chosen by the workflow's 'account' input). Entries whose key starts with '_' are notes and are ignored.",
     "\"1\", \"2\", ...: minimum seconds from a question's arrival to its answer click. AI thinking time counts towards it. \"default\" applies to any question without its own key (and to quizzes with more than 5 questions).",
-    "\"max_quiz_seconds\": ceiling on total time since this account's challenge open time (challenge_open_time.json). Each pacing wait is shortened so it never pushes the total past this value; AI and network time are not capped.",
+    "\"max_quiz_seconds\": ceiling on total time since this account's challenge open time (challenge_open_time.json). Each pacing wait is shortened so it never pushes the total past this value.",
     "Tip: keep the first ~3 questions quick; later, harder questions can take longer. Values are seconds (decimals allowed). Keep valid JSON: double quotes, no trailing commas."
   ],
   "default": 3,
