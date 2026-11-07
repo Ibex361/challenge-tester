@@ -324,6 +324,13 @@ CHALLENGE_NOT_ACTIVE_TEXT = "This challenge is not active yet."
 # seconds is required" -- an unhandled crash, not a clean stop).
 CHALLENGE_CLOSED_TEXT = "This challenge ended at"
 
+# The bot's reply when the challenge number we sent doesn't exist (e.g. we
+# sent "/start challenge_65" while the live one is 43): "Challenge not
+# found". Like CHALLENGE_CLOSED_TEXT, retrying can never help, so it fails
+# the run immediately instead of being treated as a retry-able rejection.
+# Matched case-insensitively as a substring; override via env if it changes.
+CHALLENGE_NOT_FOUND_TEXT = os.environ.get("CHALLENGE_NOT_FOUND_TEXT", "Challenge not found")
+
 # EAT (East Africa Time) is UTC+3 year-round -- no daylight saving, so this
 # is a safe fixed offset rather than something that needs a timezone
 # database lookup.
@@ -445,6 +452,29 @@ TEST_ACTIVATION_TIME_UTC = os.environ.get("TEST_ACTIVATION_TIME_UTC")           
 EARLIEST_RUN_MINUTES_BEFORE_OPEN = float(os.environ.get("EARLIEST_RUN_MINUTES_BEFORE_OPEN", "30"))
 RETRY_WINDOW_MINUTES_AFTER_OPEN = float(os.environ.get("RETRY_WINDOW_MINUTES_AFTER_OPEN", "5"))
 RETRY_INTERVAL_SECONDS = float(os.environ.get("RETRY_INTERVAL_SECONDS", "2"))
+
+# "/start" is only RE-sent after the bot actually replies with something
+# that isn't the Start-Quiz message (the "not active yet" rejection, or --
+# so a reworded rejection can't stall the run -- any other unrecognised
+# reply), and never sooner than RETRY_INTERVAL_SECONDS after the previous
+# send. Re-sending on a bare timer was the cause of the 2026-11 repeated
+# "Question 1": the first /start was accepted but its reply was slow
+# (>2s), the timer fired a second /start into an already-started session,
+# and the bot answered "You already started this quiz" and re-sent Q1.
+#
+# Replies containing any of these (comma-separated, case-insensitive)
+# mean "a session already exists" -- they never trigger a re-send.
+CHALLENGE_ALREADY_STARTED_HINTS = [
+    h.strip().lower()
+    for h in os.environ.get("CHALLENGE_ALREADY_STARTED_HINTS", "already started").split(",")
+    if h.strip()
+]
+# Safety net for total silence (the /start or its reply was lost): if the
+# bot sends NOTHING back for this many seconds, re-send anyway. Deliberately
+# much longer than a slow-but-working reply (~2-3s seen at open time) so it
+# can't re-create the duplicate-/start problem. 0 disables it (then silence
+# just waits for the deadline).
+START_NO_REPLY_RESEND_SECONDS = float(os.environ.get("START_NO_REPLY_RESEND_SECONDS", "20"))
 
 OPEN_TIME_UTC = TEST_ACTIVATION_TIME_UTC if TEST_MODE else CHALLENGE_OPEN_TIME_UTC
 if TEST_MODE and not OPEN_TIME_UTC:
@@ -2566,18 +2596,28 @@ async def message_bot_with_retry_until_active(
     client, challenge_bot, start_command, hints, deadline_dt, retry_interval_seconds, stage_name,
 ):
     """
-    Sends `start_command` to the bot, then waits for its reply. Some bots
-    reply immediately with a rejection (e.g. "This challenge is not active
-    yet.") if messaged too early -- if that happens, this waits
-    `retry_interval_seconds` and sends the command again, repeating until
-    either a message with a matching button (`hints`) arrives, or
-    `deadline_dt` passes.
+    Sends `start_command` to the bot and waits for a message with a button
+    matching `hints` (the Start Quiz message).
+
+    Re-sending rules (see the note above START_NO_REPLY_RESEND_SECONDS):
+      * "/start" is re-sent only AFTER the bot has replied with something
+        that isn't the Start-Quiz message -- the "not active yet" rejection
+        or, in case its wording changes, any other unrecognised reply --
+        and not sooner than `retry_interval_seconds` after the previous
+        send. If the Start-Quiz message arrives inside that window, no
+        re-send happens.
+      * A reply saying a session already exists (CHALLENGE_ALREADY_STARTED_
+        HINTS) never triggers a re-send; a "challenge ended" or "Challenge
+        not found" reply fails immediately (retrying can't help).
+      * Total silence for START_NO_REPLY_RESEND_SECONDS triggers one
+        re-send as a safety net (0 = off).
 
     Returns (message, (row, col), sent_at) for the matched button, where
     sent_at is the time.monotonic() timestamp of the specific "/start" send
     that led to this response (i.e. not an earlier rejected attempt).
     """
     result_fut = asyncio.get_event_loop().create_future()
+    rejection_event = asyncio.Event()
 
     async def handler(event):
         if result_fut.done():
@@ -2589,13 +2629,24 @@ async def message_bot_with_retry_until_active(
             return
         text = (msg.text or "").strip()
         preview = text.replace("\n", " ")[:60]
+        lowered = text.lower()
         if CHALLENGE_CLOSED_TEXT in text:
             log(stage_name, "INFO", f"bot reports the challenge has closed (preview: '{preview}') -- stopping, retrying can't help")
             result_fut.set_exception(StageFailure(stage_name, f"challenge is closed: '{preview}'"))
-        elif CHALLENGE_NOT_ACTIVE_TEXT in text:
+        elif CHALLENGE_NOT_FOUND_TEXT.lower() in lowered:
+            log(stage_name, "INFO", f"bot says the challenge wasn't found (preview: '{preview}') -- stopping, retrying can't help")
+            result_fut.set_exception(StageFailure(
+                stage_name,
+                f"challenge not found: '{preview}' -- check the challenge number that was sent ({start_command})",
+            ))
+        elif any(hint in lowered for hint in CHALLENGE_ALREADY_STARTED_HINTS):
+            log(stage_name, "INFO", f"bot says a session already exists (preview: '{preview}') -- not re-sending /start")
+        elif CHALLENGE_NOT_ACTIVE_TEXT.lower() in lowered:
             log(stage_name, "INFO", "bot reports the challenge is not active yet -- will retry")
+            rejection_event.set()
         else:
-            log(stage_name, "INFO", f"message received without matching button, still waiting (preview: '{preview}')")
+            log(stage_name, "INFO", f"unrecognised reply without a Start button (preview: '{preview}') -- treating it as a rejection and will retry")
+            rejection_event.set()
 
     client.add_event_handler(handler, events.NewMessage(chats=challenge_bot))
     try:
@@ -2606,18 +2657,47 @@ async def message_bot_with_retry_until_active(
                 log(stage_name, "TIMEOUT", f"no matching message before deadline ({deadline_dt.isoformat()})")
                 raise StageFailure(stage_name, "timed out waiting for a message with the expected button")
 
+            rejection_event.clear()
             sent_at = time.monotonic()
             await client.send_message(challenge_bot, start_command)
             log(stage_name, "INFO", f"sent '{start_command}' (attempt {attempt})")
 
-            wait_for = min(remaining, retry_interval_seconds)
+            # Phase 1: wait for the Start-Quiz message, a rejection, or
+            # (safety net) total silence.
+            silence = START_NO_REPLY_RESEND_SECONDS if START_NO_REPLY_RESEND_SECONDS > 0 else None
+            phase1_timeout = min(remaining, silence) if silence else remaining
+            rejection_waiter = asyncio.ensure_future(rejection_event.wait())
             try:
-                msg, loc = await asyncio.wait_for(asyncio.shield(result_fut), timeout=wait_for)
+                await asyncio.wait({result_fut, rejection_waiter}, timeout=phase1_timeout, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                rejection_waiter.cancel()
+
+            if result_fut.done():
+                msg, loc = result_fut.result()  # re-raises StageFailure if the challenge is closed
                 log(stage_name, "OK", f"found matching button at row {loc[0]}, col {loc[1]} (attempt {attempt})")
                 return msg, loc, sent_at
-            except asyncio.TimeoutError:
+
+            if rejection_event.is_set():
+                # Keep the retry window: not before retry_interval_seconds
+                # after this send. A Start-Quiz message landing inside it
+                # still wins, with no re-send.
+                window_left = sent_at + retry_interval_seconds - time.monotonic()
+                window_left = min(window_left, (deadline_dt - datetime.now(timezone.utc)).total_seconds())
+                if window_left > 0:
+                    await asyncio.wait({result_fut}, timeout=window_left)
+                if result_fut.done():
+                    msg, loc = result_fut.result()
+                    log(stage_name, "OK", f"found matching button at row {loc[0]}, col {loc[1]} (attempt {attempt})")
+                    return msg, loc, sent_at
                 attempt += 1
                 continue
+
+            if silence and phase1_timeout >= silence:
+                log(stage_name, "INFO", f"no reply of any kind within {silence:.0f}s -- re-sending '{start_command}'")
+                attempt += 1
+                continue
+            # No silence safety net and nothing arrived: the deadline check
+            # at the top of the loop ends this with a timeout.
     finally:
         client.remove_event_handler(handler, events.NewMessage(chats=challenge_bot))
 
