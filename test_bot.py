@@ -1375,8 +1375,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await query.message.reply_text(
                 "🏁 Challenge complete! (TEST)\n"
-                f"Score: {score}/{TOTAL_QUESTIONS}\n"
-                f"Time: {time_str}\n"
+                f"Your Score: {score}/{TOTAL_QUESTIONS}\n"
+                f"Response time: {time_str}\n"
                 f"{ai_info_line}"
                 f"{review_block}"
                 "Thanks for testing."

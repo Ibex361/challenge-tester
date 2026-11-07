@@ -199,7 +199,7 @@ START_QUIZ_TEXT_HINTS = os.environ.get(
 ).split(",")
 
 # Positive-signal regex for recognizing an actual question message (used by
-# _first_question_handler in main()). Matches the confirmed real format,
+# _quiz_message_handler and _is_question_message in run_challenge.py). Matches the confirmed real format,
 # e.g. "Question 1/5 \u23f1\ufe0f ...", "Question 2/5 ...". Configurable in
 # case the bot's wording ever changes; case-insensitive.
 QUESTION_TEXT_PATTERN = os.environ.get("QUESTION_TEXT_PATTERN", r"question\s+\d+\s*/\s*\d+")
@@ -227,7 +227,7 @@ def _parse_click_mode(env_name: str, default: str = "await") -> str:
 # as it doesn't for a stale/expired Start Quiz button), so every real
 # Start-Quiz click may just be waiting out that fixed ~15s ceiling for
 # nothing -- confirmed harmless to skip, since Q1 arrives independent of
-# this click either way (see _first_question_handler in main()).
+# this click either way (see _quiz_message_handler and _is_question_message in run_challenge.py).
 #   "await"           (default/current behavior) -- click and wait for
 #                      Telegram's confirmation before proceeding. Safest;
 #                      guaranteed not to change behavior if the click turns
@@ -250,7 +250,24 @@ START_QUIZ_CLICK_MODE = _parse_click_mode("START_QUIZ_CLICK_MODE")
 # finding.
 ANSWER_CLICK_MODE = _parse_click_mode("ANSWER_CLICK_MODE")
 
+# No longer controls how many questions get answered (the question loop is
+# driven by what the bot actually sends and ends on the completion message
+# -- see run_question_loop). Still used as the lower bound of the pacing
+# table, so questions 1..TOTAL_QUESTIONS always have an explicit entry.
 TOTAL_QUESTIONS = int(os.environ.get("TOTAL_QUESTIONS", "5"))
+
+# A message with NO buttons whose text contains any of these (case-
+# insensitive, comma-separated) is treated as the quiz-completion message.
+COMPLETION_TEXT_HINTS = [
+    h.strip().lower()
+    for h in os.environ.get("COMPLETION_TEXT_HINTS", "your score,response time").split(",")
+    if h.strip()
+]
+
+# Fallback stop: if neither a completion message nor another question
+# arrives within this many seconds of the last question we clicked, assume
+# the quiz is over and finish instead of hanging until the quiz deadline.
+POST_QUESTION_IDLE_SECONDS = float(os.environ.get("POST_QUESTION_IDLE_SECONDS", "15"))
 
 # ---- Stage 1 timing ----
 # The bot rejects /start before it opens, replying with the exact text in
@@ -786,7 +803,7 @@ PACING_CONFIG_PATH = os.path.join(
 def _load_pacing_config() -> tuple[dict, float]:
     """
     Reads control/pacing_<PACING_CONFIG_NAME>.json and returns
-    (per_question, max_quiz_seconds):
+    (per_question, max_quiz_seconds, default_seconds):
       - per_question: {question_number: seconds} resolved for every
         question in 1..TOTAL_QUESTIONS (falling back to "default" for any
         question not explicitly listed).
@@ -827,15 +844,20 @@ def _load_pacing_config() -> tuple[dict, float]:
     default_seconds = _as_seconds(raw["default"], "default")
     max_quiz_seconds = _as_seconds(raw["max_quiz_seconds"], "max_quiz_seconds")
     per_question = {}
-    for q in range(1, TOTAL_QUESTIONS + 1):
+    # Every question 1..TOTAL_QUESTIONS gets an entry, plus any further
+    # numeric key present in the file (the quiz length isn't fixed any
+    # more). Question numbers with no entry at all use "default" at lookup
+    # time (PACING_DEFAULT_SECONDS).
+    numeric_keys = {int(k) for k in raw if str(k).isdigit()}
+    for q in sorted(set(range(1, TOTAL_QUESTIONS + 1)) | numeric_keys):
         key = str(q)
         per_question[q] = _as_seconds(raw[key], key) if key in raw else default_seconds
 
-    print(f"[pacing] Loaded {PACING_CONFIG_PATH}: per_question={per_question}, max_quiz_seconds={max_quiz_seconds}")
-    return per_question, max_quiz_seconds
+    print(f"[pacing] Loaded {PACING_CONFIG_PATH}: per_question={per_question}, default={default_seconds}, max_quiz_seconds={max_quiz_seconds}")
+    return per_question, max_quiz_seconds, default_seconds
 
 
-PACING_SECONDS_BY_QUESTION, MAX_QUIZ_SECONDS = _load_pacing_config()
+PACING_SECONDS_BY_QUESTION, MAX_QUIZ_SECONDS, PACING_DEFAULT_SECONDS = _load_pacing_config()
 
 # Temporary diagnostic switch: when true, logs every incoming message in
 # the challenge bot's chat (scoped via chats=challenge_bot -- see the
@@ -1435,7 +1457,7 @@ def _ask_groq_for_answer_with_model(
                 },
             },
         }
-        max_completion_tokens = 1000
+        max_completion_tokens = 1300
     else:
         json_instruction = (
             "\n\nRespond with ONLY a JSON object of the exact form "
@@ -2327,6 +2349,219 @@ async def wait_for_event_with_deadline(client, event_builder, deadline_dt, stage
         client.remove_event_handler(handler, event_builder)
 
 
+# ----------------------------------------------------------------------
+# Stage 3: the question loop
+#
+# Deliberately independent of the bot's own question numbering/total (the
+# "Question X/N" header may change or vanish) and of any fixed question
+# count. It reads every message the bot sends from a queue and reacts to
+# what each one IS:
+#   * question (buttons)  -> answer it; the chosen letter is remembered by
+#                            the question's content signature
+#   * same question again -> click the remembered letter on the new copy,
+#                            no AI call, no pacing (the bot may not reveal
+#                            the next question until the repeat is answered)
+#   * completion message  -> no buttons + contains "your score"/"response
+#                            time" (COMPLETION_TEXT_HINTS) -> done
+#   * anything else       -> logged and ignored
+# Fallback: no completion message and no new question within
+# POST_QUESTION_IDLE_SECONDS of the last click -> stop.
+# ----------------------------------------------------------------------
+
+def _is_completion_message(message: Message) -> bool:
+    if message.buttons:
+        return False
+    text = (message.text or "").lower()
+    return any(hint in text for hint in COMPLETION_TEXT_HINTS)
+
+
+def _is_question_message(message: Message, require_question_pattern: bool) -> bool:
+    """
+    A question has several answer buttons and is not the welcome/Start-Quiz
+    message. QUESTION_TEXT_PATTERN (default: the "Question X/N" header) is
+    only demanded for the FIRST question -- the same guard the old
+    first-question listener used against unrelated buttoned messages --
+    never for later ones, so a bot that drops the header mid-quiz can't
+    stall the loop. Set QUESTION_TEXT_PATTERN="" to disable it entirely.
+    """
+    if not message.buttons or len(extract_mcq_options(message)) < 2:
+        return False
+    if find_button_by_hints(message, START_QUIZ_TEXT_HINTS) is not None:
+        return False
+    if require_question_pattern and not re.search(QUESTION_TEXT_PATTERN, message.text or "", re.IGNORECASE):
+        return False
+    return True
+
+
+def _question_signature(text: str, options: list[str]) -> str:
+    """
+    Content fingerprint used to recognise a re-sent copy of a question: the
+    text with the optional "Question X/N" header stripped (so a changed or
+    missing header can't make a copy look different), whitespace-collapsed
+    and case-folded, plus the option labels.
+    """
+    if QUESTION_TEXT_PATTERN:
+        text = re.sub(QUESTION_TEXT_PATTERN, "", text, count=1, flags=re.IGNORECASE)
+    body = " ".join(text.split()).casefold()
+    return body + "||" + "|".join(" ".join(o.split()).casefold() for o in options)
+
+
+def _locate_button(message: Message, flat_index: int):
+    """Maps the flat option index (see extract_mcq_options) back to (row, col)."""
+    flat = 0
+    for row_idx, row in enumerate(message.buttons or []):
+        for col_idx, _ in enumerate(row):
+            if flat == flat_index:
+                return row_idx, col_idx
+            flat += 1
+    return None
+
+
+async def run_question_loop(quiz_queue, quiz_deadline, quiz_click_at, ask_answer, click_answer, idle_seconds=None):
+    """
+    Answers questions until the quiz ends. quiz_queue yields
+    (event, arrived_monotonic) tuples for every message in the bot's chat.
+    ask_answer(question_text, options, stage, q_num) -> letter (blocking;
+    run in a worker thread). click_answer(message, row, col, stage) is an
+    async click. Returns {"questions", "repeats", "completion_text"}.
+    """
+    idle_seconds = POST_QUESTION_IDLE_SECONDS if idle_seconds is None else idle_seconds
+    answered = {}        # signature -> (letter, flat_index, q_num)
+    q_count = 0
+    repeat_count = 0
+    idle_deadline = None  # monotonic; set after each clicked question
+    announced_wait = False
+
+    while True:
+        remaining_quiz = (quiz_deadline - datetime.now(timezone.utc)).total_seconds()
+        if remaining_quiz <= 0:
+            raise StageFailure(f"Question {q_count + 1}: wait for question", "deadline already passed")
+
+        if idle_deadline is None:
+            timeout = remaining_quiz
+            if not announced_wait:
+                log(f"Question {q_count + 1}: wait for question", "START", f"waiting up to {int(remaining_quiz)}s")
+                announced_wait = True
+        else:
+            idle_remaining = max(idle_deadline - time.monotonic(), 0.0)
+            timeout = min(remaining_quiz, idle_remaining)
+
+        try:
+            event, arrived_at = await asyncio.wait_for(quiz_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            if idle_deadline is None or timeout >= remaining_quiz:
+                stage = f"Question {q_count + 1}: wait for question"
+                log(stage, "TIMEOUT", f"no matching message before deadline ({quiz_deadline.isoformat()})")
+                raise StageFailure(stage, "timed out waiting for message")
+            log(
+                "Challenge flow", "INFO",
+                f"no completion message and no new question within {idle_seconds:.0f}s of the last "
+                f"question ({q_count} answered, {repeat_count} repeat(s) re-clicked) -- assuming the quiz is finished",
+            )
+            return {"questions": q_count, "repeats": repeat_count, "completion_text": None}
+
+        message: Message = event.message
+
+        if _is_completion_message(message):
+            if q_count == 0:
+                raise StageFailure(
+                    "Challenge flow",
+                    f"completion-style message received before any question: {(message.text or '')[:120]!r}",
+                )
+            text = " ".join((message.text or "").split())
+            log("Challenge flow", "INFO", f"completion message received: {text[:160]}")
+            return {"questions": q_count, "repeats": repeat_count, "completion_text": text}
+
+        if not _is_question_message(message, require_question_pattern=(q_count == 0)):
+            preview = " ".join((message.text or "").split())[:100]
+            log("Challenge flow", "INFO", f"ignoring non-question message: {preview!r}")
+            continue
+
+        options = extract_mcq_options(message)
+        question_text = message.text or ""
+        signature = _question_signature(question_text, options)
+
+        # ---- repeat of an already-answered question ----
+        if signature in answered:
+            letter, flat_index, first_q_num = answered[signature]
+            repeat_count += 1
+            stage = f"Question {first_q_num} (repeat)"
+            pos = _locate_button(message, flat_index)
+            log(stage, "INFO", f"same question received again -- re-clicking {letter} with no AI call and no pacing")
+            if pos is not None:
+                try:
+                    await click_answer(message, pos[0], pos[1], stage)
+                except Exception as e:  # a failed repeat click must not kill a run whose first click worked
+                    log(stage, "INFO", f"repeat click failed ({e}); continuing")
+            idle_deadline = time.monotonic() + idle_seconds
+            continue
+
+        # ---- a new question ----
+        q_count += 1
+        q_num = q_count
+        stage = f"Question {q_num}"
+        announced_wait = False
+        log(f"{stage}: wait for question", "OK", "message received")
+        bare_letters = _options_are_bare_letters(options)
+        log(stage, "INFO",
+            f"parsed {len(options)} options"
+            + (" (bare-letter buttons -- real option text is in the question)" if bare_letters else ""))
+
+        # Blocking network call -> worker thread so Telethon's event loop
+        # (and the queue handler) keeps running while the AI thinks.
+        answer_letter = await asyncio.to_thread(ask_answer, question_text, options, stage, q_num)
+        answer_index = _LETTERS.index(answer_letter)
+        if bare_letters:
+            log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter} (option text is in the question above, not the button)")
+        else:
+            answer_text = _strip_redundant_letter_prefix(options[answer_index], answer_letter) if answer_index < len(options) else "?"
+            log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
+
+        # Remember it right away so any repeat that queued up meanwhile is
+        # answered identically the moment this one is clicked.
+        answered[signature] = (answer_letter, answer_index, q_num)
+
+        # Per-question pacing floor (control/pacing_<account>.json), anchored
+        # to when the message ARRIVED (arrived_at, stamped by the queue
+        # handler) so AI time and any queueing delay already count toward it.
+        # Capped by MAX_QUIZ_SECONDS. Question numbers beyond the table use
+        # the file's "default". See the 2026-09-06/07 notes in context.json.
+        elapsed_since_question = time.monotonic() - arrived_at
+        floor = PACING_SECONDS_BY_QUESTION.get(q_num, PACING_DEFAULT_SECONDS)
+        elapsed_since_quiz_start = time.monotonic() - quiz_click_at
+        remaining_quiz_budget = MAX_QUIZ_SECONDS - elapsed_since_quiz_start
+        uncapped_wait = floor - elapsed_since_question
+        wait_for = min(uncapped_wait, remaining_quiz_budget)
+        if wait_for > 0:
+            capped_note = (
+                f" (capped by MAX_QUIZ_SECONDS — remaining budget {remaining_quiz_budget:.1f}s < "
+                f"uncapped {uncapped_wait:.1f}s)"
+                if wait_for < uncapped_wait
+                else ""
+            )
+            log(
+                stage, "INFO",
+                f"pacing: waiting {wait_for:.1f}s before click{capped_note} "
+                f"(floor={floor:.1f}s, {elapsed_since_question:.1f}s already elapsed for this "
+                f"question; quiz budget: {elapsed_since_quiz_start:.1f}s/{MAX_QUIZ_SECONDS:.1f}s used)",
+            )
+            await asyncio.sleep(wait_for)
+        elif elapsed_since_question < floor:
+            log(
+                stage, "INFO",
+                f"pacing: skipping wait -- MAX_QUIZ_SECONDS ({MAX_QUIZ_SECONDS:.1f}s) already reached "
+                f"({elapsed_since_quiz_start:.1f}s elapsed since quiz start; this question's floor was "
+                f"{floor:.1f}s, only {elapsed_since_question:.1f}s had passed)",
+            )
+
+        pos = _locate_button(message, answer_index)
+        if pos is None:
+            raise StageFailure(stage, "failed to map answer letter to a button position")
+        await click_answer(message, pos[0], pos[1], stage)
+        log(stage, "OK", f"clicked option {answer_letter}")
+        idle_deadline = time.monotonic() + idle_seconds
+
+
 async def message_bot_with_retry_until_active(
     client, challenge_bot, start_command, hints, deadline_dt, retry_interval_seconds, stage_name,
 ):
@@ -2424,7 +2659,7 @@ async def main():
         f"START_QUIZ_CLICK_MODE={START_QUIZ_CLICK_MODE} ANSWER_CLICK_MODE={ANSWER_CLICK_MODE} | "
         f"PACING_CONFIG_NAME={PACING_CONFIG_NAME} | "
         f"SECTION_NOTES={SECTION_NOTES_NAME or '(none)'} | "
-        f"TOTAL_QUESTIONS={TOTAL_QUESTIONS}",
+        f"questions=auto (ends on completion message or {POST_QUESTION_IDLE_SECONDS:.0f}s idle)",
     )
 
     now = datetime.now(timezone.utc)
@@ -2532,33 +2767,18 @@ async def main():
         # already listening before /start goes out), Q1 sent only after
         # the click (still covered, arrives at an already-registered
         # listener), or anything in between.
-        first_question_fut = asyncio.get_event_loop().create_future()
+        # Queue of every message the bot sends, stamped with arrival time.
+        # Registered BEFORE /start for the reason above, and it stays
+        # registered for the whole quiz so no message (a question, a
+        # re-sent copy, the completion message) can be missed while the
+        # loop is busy with the AI call or a pacing sleep. The handler is a
+        # single put_nowait -- no I/O, no awaiting -- so it adds no delay.
+        quiz_queue: asyncio.Queue = asyncio.Queue()
 
-        async def _first_question_handler(event):
-            if first_question_fut.done():
-                return
-            msg = event.message
-            # Require this to actually look like a question message: real
-            # answer-option buttons (plural -- an MCQ has several) AND text
-            # matching QUESTION_TEXT_PATTERN, not just "has buttons and
-            # isn't the Start-Quiz message." The earlier, purely-negative
-            # version of this check would have latched onto ANY buttoned
-            # message that wasn't a rejection or the Welcome message as
-            # "Question 1" -- e.g. an unrelated announcement or a "join our
-            # channel" prompt landing in the same chat before Q1 actually
-            # arrives. Rejections like "CHALLENGE CLOSED" have no buttons
-            # at all (confirmed in a live debug log) so they were already
-            # excluded either way, but this is a meaningfully stricter,
-            # positive-signal match rather than relying on exclusion alone.
-            if not msg.buttons or len(extract_mcq_options(msg)) < 2:
-                return
-            if find_button_by_hints(msg, START_QUIZ_TEXT_HINTS) is not None:
-                return  # this is the welcome/"Start Quiz" message itself -- ignore
-            if not re.search(QUESTION_TEXT_PATTERN, msg.text or "", re.IGNORECASE):
-                return
-            first_question_fut.set_result(event)
+        async def _quiz_message_handler(event):
+            quiz_queue.put_nowait((event, time.monotonic()))
 
-        client.add_event_handler(_first_question_handler, events.NewMessage(chats=challenge_bot))
+        client.add_event_handler(_quiz_message_handler, events.NewMessage(chats=challenge_bot))
 
         try:
             start_command = f"/start challenge_{CHALLENGE_NUMBER}"
@@ -2589,139 +2809,23 @@ async def main():
             quiz_click_at = time.monotonic()
             log("Click Start Quiz", "OK", f"timer started")
 
-            # ---- Stage 3: answer each question ----
-            for q_num in range(1, TOTAL_QUESTIONS + 1):
-                stage = f"Question {q_num}/{TOTAL_QUESTIONS}"
+            # ---- Stage 3: answer questions until the quiz ends ----
+            async def _click_answer(message, row, col, stage):
+                await click_button_or_follow_deep_link(client, message, row, col, stage, click_mode=ANSWER_CLICK_MODE)
 
-                if q_num == 1:
-                    # May already be resolved (message arrived before or
-                    # during the click above) -- wait_for below returns
-                    # immediately in that case instead of blocking.
-                    remaining = (quiz_deadline - datetime.now(timezone.utc)).total_seconds()
-                    if remaining <= 0:
-                        raise StageFailure(f"{stage}: wait for question", "deadline already passed")
-                    log(f"{stage}: wait for question", "START", f"waiting up to {int(remaining)}s")
-                    try:
-                        q_event = await asyncio.wait_for(first_question_fut, timeout=remaining)
-                        log(f"{stage}: wait for question", "OK", "message received")
-                    except asyncio.TimeoutError:
-                        log(f"{stage}: wait for question", "TIMEOUT",
-                            f"no matching message before deadline ({quiz_deadline.isoformat()})")
-                        raise StageFailure(f"{stage}: wait for question", "timed out waiting for message")
-                else:
-                    q_event = await wait_for_event_with_deadline(
-                        client,
-                        events.NewMessage(chats=challenge_bot),
-                        quiz_deadline,
-                        f"{stage}: wait for question",
-                    )
-                q_message: Message = q_event.message
-                question_received_at = time.monotonic()
-
-                options = extract_mcq_options(q_message)
-                if not options:
-                    raise StageFailure(stage, "message received but no answer buttons found")
-
-                question_text = q_message.text or ""
-                bare_letters = _options_are_bare_letters(options)
-                log(stage, "INFO",
-                    f"parsed {len(options)} options"
-                    + (" (bare-letter buttons -- real option text is in the question)" if bare_letters else ""))
-
-                # ask_ai_for_answer() is a blocking, synchronous call (network
-                # I/O + time.sleep on retry). Run it in a worker thread so it
-                # doesn't freeze this event loop -- otherwise Telethon can't
-                # process anything else (including the eventual button click)
-                # until the call returns, which is what caused the apparent
-                # "stall" on Question 4.
-                answer_letter = await asyncio.to_thread(
-                    ask_ai_for_answer, question_text, options, stage, q_num
-                )
-                answer_index = _LETTERS.index(answer_letter)
-                if bare_letters:
-                    # options[answer_index] is just the letter itself here
-                    # (e.g. "A") -- not real content, so don't present it as
-                    # if it were the chosen option's text; say plainly that
-                    # the real text lives in the question message instead.
-                    log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter} (option text is in the question above, not the button)")
-                else:
-                    answer_text = _strip_redundant_letter_prefix(options[answer_index], answer_letter) if answer_index < len(options) else "?"
-                    log(stage, "INFO", f"{AI_PROVIDER.capitalize()}'s answer: {answer_letter}) {answer_text}")
-
-                # Per-question pacing floor (control/pacing_<account>.json):
-                # hold the click back until at least this question's
-                # configured number of seconds have passed since its
-                # message arrived. Anchored to message receipt (not e.g.
-                # Groq's response time) so a slow Groq call -- including a
-                # rate-limit backoff -- already counts toward the floor;
-                # the sleep below only fires when Groq answered faster
-                # than the floor allows. Applies to every question now,
-                # not just the last one (see 2026-09-06 decision in
-                # context.json).
-                #
-                # Capped by MAX_QUIZ_SECONDS: the wait is trimmed (never
-                # extended) so total time since the Start Quiz click never
-                # exceeds that ceiling -- e.g. if 28s have passed and this
-                # question's floor would reach 33s, it only waits 2s (to
-                # reach 30s), not the full floor. If the ceiling has
-                # already been reached, this question isn't paced at all.
-                # Both log lines below include the underlying numbers
-                # (floor, elapsed, quiz budget used) so pacing_SAF.json /
-                # pacing_ETH.json can be tuned from the log alone, without
-                # re-deriving them from raw timestamps (added 2026-09-07).
-                elapsed_since_question = time.monotonic() - question_received_at
-                floor = PACING_SECONDS_BY_QUESTION[q_num]
-                elapsed_since_quiz_start = time.monotonic() - quiz_click_at
-                remaining_quiz_budget = MAX_QUIZ_SECONDS - elapsed_since_quiz_start
-                uncapped_wait = floor - elapsed_since_question
-                wait_for = min(uncapped_wait, remaining_quiz_budget)
-                if wait_for > 0:
-                    capped_note = (
-                        f" (capped by MAX_QUIZ_SECONDS — remaining budget {remaining_quiz_budget:.1f}s < "
-                        f"uncapped {uncapped_wait:.1f}s)"
-                        if wait_for < uncapped_wait
-                        else ""
-                    )
-                    log(
-                        stage,
-                        "INFO",
-                        f"pacing: waiting {wait_for:.1f}s before click{capped_note} "
-                        f"(floor={floor:.1f}s, {elapsed_since_question:.1f}s already elapsed for this "
-                        f"question; quiz budget: {elapsed_since_quiz_start:.1f}s/{MAX_QUIZ_SECONDS:.1f}s used)",
-                    )
-                    await asyncio.sleep(wait_for)
-                elif elapsed_since_question < floor:
-                    log(
-                        stage,
-                        "INFO",
-                        f"pacing: skipping wait -- MAX_QUIZ_SECONDS ({MAX_QUIZ_SECONDS:.1f}s) already reached "
-                        f"({elapsed_since_quiz_start:.1f}s elapsed since quiz start; this question's floor was "
-                        f"{floor:.1f}s, only {elapsed_since_question:.1f}s had passed)",
-                    )
-
-                # Buttons were flattened row-by-row in extract_mcq_options; map
-                # the flat index back to (row, col) for the click.
-                flat_idx = 0
-                clicked = False
-                for row_idx, row in enumerate(q_message.buttons):
-                    for col_idx, _ in enumerate(row):
-                        if flat_idx == answer_index:
-                            await click_button_or_follow_deep_link(client, q_message, row_idx, col_idx, stage, click_mode=ANSWER_CLICK_MODE)
-                            clicked = True
-                            break
-                        flat_idx += 1
-                    if clicked:
-                        break
-
-                if not clicked:
-                    raise StageFailure(stage, "failed to map answer letter to a button position")
-
-                log(stage, "OK", f"clicked option {answer_letter}")
+            quiz_result = await run_question_loop(
+                quiz_queue, quiz_deadline, quiz_click_at, ask_ai_for_answer, _click_answer,
+            )
         finally:
-            client.remove_event_handler(_first_question_handler, events.NewMessage(chats=challenge_bot))
+            client.remove_event_handler(_quiz_message_handler, events.NewMessage(chats=challenge_bot))
 
-        log("Challenge flow", "OK", "all questions answered")
-        flush_summary("SUCCESS ✅")
+        repeats_note = f", {quiz_result['repeats']} repeated copy(ies) re-clicked" if quiz_result["repeats"] else ""
+        if quiz_result["completion_text"] is not None:
+            log("Challenge flow", "OK", f"{quiz_result['questions']} question(s) answered{repeats_note}; completion message received")
+            flush_summary("SUCCESS ✅")
+        else:
+            log("Challenge flow", "OK", f"{quiz_result['questions']} question(s) answered{repeats_note}; no completion message seen (stopped on idle fallback)")
+            flush_summary("SUCCESS ✅ (no completion message seen)")
 
     except StageFailure as e:
         log(e.stage, "FAIL", e.detail)
