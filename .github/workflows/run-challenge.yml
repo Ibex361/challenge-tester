@@ -34,6 +34,14 @@ on:
         description: "Test mode only: how many minutes the test bot should stay listening"
         type: string
         default: "10"
+      start_test_bot:
+        description: "Test mode only: start the test bot in THIS run (default: on). Turn it OFF in the 2nd and 3rd run when running several accounts at once so they all share ONE test bot -- Telegram lets only one process poll a bot, so two bots on the same token break each other's sessions ('Session expired'). Start the run that hosts the bot first. The hosting run's bot activation time, quiz selection and run minutes apply to everyone; give the other runs the same bot activation time."
+        type: boolean
+        default: true
+      keep_test_bot_alive:
+        description: "Test mode only (only used when start_test_bot is on): after this run's own quiz finishes, keep the job alive until the test bot's run minutes elapse, so other runs sharing this bot can finish. Costs extra Actions minutes on this run only."
+        type: boolean
+        default: false
       test_activation_time_eat:
         description: "Test mode only: activation time the TESTER waits for (HH:MM, EAT). Defaults to the same value as the test bot's activation time above -- override only if you deliberately want them different."
         type: string
@@ -271,7 +279,9 @@ jobs:
           echo "Resolved for this run: AI_PROVIDER=$provider MODEL=$model THINKING_LEVEL=${{ github.event.inputs.thinking_level || 'low' }}"
 
       - name: Start test bot in background (test mode only)
-        if: ${{ github.event.inputs.test_mode == 'true' }}
+        # start_test_bot defaults to true; only an explicit 'false' skips
+        # this (so a run triggered without the input still starts the bot).
+        if: ${{ github.event.inputs.test_mode == 'true' && github.event.inputs.start_test_bot != 'false' }}
         env:
           TEST_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
           TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.test_bot_run_minutes || '10' }}
@@ -453,12 +463,45 @@ jobs:
           fi
           python run_challenge.py
 
+      - name: Keep test bot alive until its run time ends (test mode, opt-in)
+        # Opt-in via keep_test_bot_alive. The test bot is a background
+        # process of THIS job, so it dies the moment the job ends. When
+        # other runs share this bot (they set start_test_bot=false), this
+        # run must not finish before they do. always() so it also holds
+        # when this run's own tester failed. test_bot.py exits by itself
+        # after TEST_BOT_RUN_MINUTES, so just wait for that (bounded).
+        if: ${{ always() && github.event.inputs.test_mode == 'true' && github.event.inputs.start_test_bot != 'false' && github.event.inputs.keep_test_bot_alive == 'true' }}
+        env:
+          TEST_BOT_RUN_MINUTES: ${{ github.event.inputs.test_bot_run_minutes || '10' }}
+        run: |
+          if [ ! -f test_bot.pid ] || ! kill -0 "$(cat test_bot.pid)" 2>/dev/null; then
+            echo "Test bot is not running any more -- nothing to keep alive."
+            exit 0
+          fi
+          if awk "BEGIN{exit !($TEST_BOT_RUN_MINUTES > 50)}"; then
+            echo "::warning::test_bot_run_minutes=$TEST_BOT_RUN_MINUTES is close to/above this job's 60-minute timeout; the job may be cut off before the bot stops."
+          fi
+          # Hard cap: the bot's configured run time plus a minute of slack.
+          max_wait=$(awk "BEGIN{printf \"%d\", $TEST_BOT_RUN_MINUTES * 60 + 60}")
+          echo "Keeping the test bot alive until it stops on its own (it runs for ${TEST_BOT_RUN_MINUTES} min from when it started; cap ${max_wait}s of total bot uptime)."
+          while kill -0 "$(cat test_bot.pid)" 2>/dev/null; do
+            uptime_s=$(ps -o etimes= -p "$(cat test_bot.pid)" 2>/dev/null | tr -d ' ')
+            if [ -n "$uptime_s" ] && [ "$uptime_s" -ge "$max_wait" ]; then
+              echo "::warning::test bot still running after ${uptime_s}s -- giving up waiting; it will be stopped when this job ends."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Test bot has stopped."
+
       - name: Show test bot log (test mode only)
         if: ${{ always() && github.event.inputs.test_mode == 'true' }}
         run: |
           if [ -f test_bot.log ]; then
             echo "----- test_bot.py output -----"
             cat test_bot.log
+          elif [ "${{ github.event.inputs.start_test_bot }}" = "false" ]; then
+            echo "This run did not start a test bot (start_test_bot=false) -- it used the bot started by another run, whose log is in that run."
           else
             echo "No test_bot.log found (test bot may not have started)."
           fi
