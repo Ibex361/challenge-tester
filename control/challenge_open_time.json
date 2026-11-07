@@ -1,4 +1,10 @@
 {
+  "_comment": [
+    "Challenge open time per account, in East Africa Time (EAT, UTC+3): 12-hour format with seconds, e.g. \"8:00:03 PM\".",
+    "The script messages the bot at this time, and measures 'max_quiz_seconds' (pacing_<ACCOUNT>.json) from it.",
+    "Add or edit an entry named after the account (SAF, ETH, Ab62, Ab82). Accounts without their own entry use \"default\", which is required.",
+    "Entries whose key starts with '_' are notes and are ignored. Keep valid JSON: double quotes, no trailing commas."
+  ],
   "default": {
     "open_time_eat": "8:00:03 PM"
   },
